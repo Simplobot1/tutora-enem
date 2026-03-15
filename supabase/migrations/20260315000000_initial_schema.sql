@@ -1,5 +1,5 @@
 -- Enable Extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- 1. Users Profile (Linked to auth.users)
@@ -14,7 +14,7 @@ CREATE TABLE public.users (
 
 -- 2. Materials (NotebookLM Ingestion)
 CREATE TABLE public.materials (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title TEXT NOT NULL,
     content TEXT,
     type TEXT CHECK (type IN ('pdf', 'audio', 'text', 'flashcard_set')),
@@ -25,7 +25,7 @@ CREATE TABLE public.materials (
 
 -- 3. Questions (ENEM Database)
 CREATE TABLE public.questions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content TEXT NOT NULL,
     alternatives JSONB NOT NULL, -- Format: [{"label": "A", "text": "..."}, ...]
     correct_alternative CHAR(1) NOT NULL,
@@ -41,7 +41,7 @@ CREATE TABLE public.questions (
 
 -- 4. Study Sessions
 CREATE TABLE public.study_sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
     type TEXT CHECK (type IN ('quiz', 'review', 'socratic_drill')),
     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'abandoned')),
@@ -52,7 +52,7 @@ CREATE TABLE public.study_sessions (
 
 -- 5. Answers (User Interactions)
 CREATE TABLE public.answers (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
     question_id UUID REFERENCES public.questions(id) ON DELETE CASCADE NOT NULL,
     session_id UUID REFERENCES public.study_sessions(id) ON DELETE SET NULL,
@@ -65,7 +65,7 @@ CREATE TABLE public.answers (
 
 -- 6. Flashcards (Anki integration)
 CREATE TABLE public.flashcards (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
     question_id UUID REFERENCES public.questions(id) ON DELETE SET NULL, -- Optional link to original mistake
     front TEXT NOT NULL,

@@ -22,6 +22,8 @@ ON public.questions (material_id);
 CREATE INDEX IF NOT EXISTS idx_questions_enem_frequency_score_desc
 ON public.questions (enem_frequency_score DESC NULLS LAST);
 
+DROP VIEW IF EXISTS public.performance_by_topic;
+
 CREATE OR REPLACE VIEW public.performance_by_topic AS
 WITH topic_attempts AS (
     SELECT
