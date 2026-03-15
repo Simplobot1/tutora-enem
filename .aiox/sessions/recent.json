@@ -1,0 +1,32 @@
+[
+  {
+    "sessionId": "unknown",
+    "timestamp": "2026-03-15T16:53:18.719Z",
+    "provider": "gemini"
+  },
+  {
+    "sessionId": "unknown",
+    "timestamp": "2026-03-15T16:53:18.513Z",
+    "provider": "gemini"
+  },
+  {
+    "sessionId": "unknown",
+    "timestamp": "2026-03-15T16:53:18.025Z",
+    "provider": "gemini"
+  },
+  {
+    "sessionId": "unknown",
+    "timestamp": "2026-03-15T16:53:17.908Z",
+    "provider": "gemini"
+  },
+  {
+    "sessionId": "unknown",
+    "timestamp": "2026-03-15T16:29:17.265Z",
+    "provider": "gemini"
+  },
+  {
+    "sessionId": "unknown",
+    "timestamp": "2026-03-15T16:29:16.911Z",
+    "provider": "gemini"
+  }
+]
