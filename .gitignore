@@ -30,3 +30,19 @@ Thumbs.db
 .aiox-core/local/
 .claude/settings.local.json
 .aiox/install-log.txt
+
+# Agent / IDE Tooling
+.agent/
+.aiox/
+.aiox-core/
+.antigravity/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.github/agents/
+docs/stories/0.1.codex-agent-activation.md
+AGENTS.md
+
+# Local Artifacts
+*.Zone.Identifier
