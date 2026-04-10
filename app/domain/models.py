@@ -32,6 +32,7 @@ class InboundEvent:
 class QuestionAlternative:
     label: str
     text: str
+    explanation: str = ""
 
 
 @dataclass(slots=True)
@@ -74,7 +75,11 @@ class SessionRecord:
                 source_truth=snapshot_data.get("source_truth", "student_content_only"),
                 content=snapshot_data.get("content", ""),
                 alternatives=[
-                    QuestionAlternative(label=alt.get("label", ""), text=alt.get("text", ""))
+                    QuestionAlternative(
+                        label=alt.get("label", ""),
+                        text=alt.get("text", ""),
+                        explanation=alt.get("explanation") or alt.get("rationale") or "",
+                    )
                     for alt in snapshot_data.get("alternatives", [])
                 ],
                 correct_alternative=snapshot_data.get("correct_alternative"),
@@ -100,7 +105,11 @@ class SessionRecord:
             ),
             anki=AnkiMetadata(
                 status=(metadata.get("anki") or {}).get("status"),
+                builder_mode=(metadata.get("anki") or {}).get("builder_mode"),
+                apkg_path=(metadata.get("anki") or {}).get("apkg_path"),
             ),
+            pending_student_answer=metadata.get("pending_student_answer"),
+            retry_attempts=metadata.get("retry_attempts", 0),
         )
         return cls(
             session_id=row.get("id"),

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.domain.session_metadata import QuestionRef, SessionMetadata
-from app.domain.models import InboundEvent, ServiceResult
+from app.domain.models import InboundEvent, QuestionAlternative, ServiceResult
 from app.domain.states import SessionFlow, SessionState
 from app.repositories.questions_repository import QuestionsRepository
+from app.repositories.submitted_questions_repository import SubmittedQuestionsRepository
+from app.services.question_curator_service import QuestionCuratorService
 from app.services.question_snapshot_service import QuestionSnapshotService
 from app.services.session_service import SessionService
 
@@ -14,10 +18,14 @@ class MeTestaEntryService:
         session_service: SessionService,
         question_snapshot_service: QuestionSnapshotService,
         questions_repository: QuestionsRepository | None = None,
+        question_curator_service: QuestionCuratorService | None = None,
+        submitted_questions_repository: SubmittedQuestionsRepository | None = None,
     ) -> None:
         self.session_service = session_service
         self.question_snapshot_service = question_snapshot_service
         self.questions_repository = questions_repository
+        self.question_curator_service = question_curator_service or QuestionCuratorService()
+        self.submitted_questions_repository = submitted_questions_repository
 
     async def handle_question_intake(self, event: InboundEvent) -> ServiceResult:
         session = self.session_service.get_or_create_active_session(
@@ -39,7 +47,10 @@ class MeTestaEntryService:
             self.session_service.save(session)
             return ServiceResult(
                 state=session.state,
-                reply_text="Ainda faltam dados para eu montar a questão. Me envie enunciado e alternativas A-E no mesmo texto.",
+                reply_text=(
+                    "Ainda não consegui montar a questão inteira com o que chegou aqui.\n\n"
+                    "Me manda no mesmo texto o enunciado e as alternativas A-E que eu organizo com você."
+                ),
                 metadata={
                     "flow": session.flow.value,
                     "session_id": session.session_id,
@@ -61,6 +72,7 @@ class MeTestaEntryService:
         if match is not None:
             snapshot.source_mode = "bank_match"
             snapshot.source_truth = "student_content_plus_bank_match"
+            snapshot.alternatives = self._merge_bank_alternatives(snapshot.alternatives, match.get("alternatives") or [])
             snapshot.correct_alternative = match.get("correct_alternative")
             snapshot.explanation = match.get("explanation") or ""
             snapshot.subject = match.get("subject") or snapshot.subject
@@ -75,6 +87,10 @@ class MeTestaEntryService:
             snapshot.source_mode = "student_submitted"
             snapshot.source_truth = "student_content_only"
             session.source_mode = "student_submitted"
+            snapshot = self.question_curator_service.enrich(snapshot)
+            if self.submitted_questions_repository is not None:
+                snapshot_id = self.submitted_questions_repository.create_from_snapshot(session, snapshot)
+                session.metadata.question_ref.snapshot_id = snapshot_id
 
         session.state = SessionState.WAITING_ANSWER
         session.metadata.last_user_message = {"text": text, "message_id": event.message_id, "chat_id": event.chat_id}
@@ -83,13 +99,13 @@ class MeTestaEntryService:
         alternatives_text = "\n".join(f"{alt.label}) {alt.text}" for alt in snapshot.alternatives)
         reply = "\n".join(
             [
-                "Consegui organizar a questão com o que você enviou.",
+                "Boa, organizei a questão com o que você me mandou.",
                 "",
                 snapshot.content,
                 "",
                 alternatives_text,
                 "",
-                "Agora me diga a alternativa que você marcou.",
+                "Agora me conta qual alternativa você marcou.",
             ]
         )
         return ServiceResult(
@@ -104,3 +120,33 @@ class MeTestaEntryService:
                 "alternatives_count": len(snapshot.alternatives),
             },
         )
+
+    def _merge_bank_alternatives(
+        self,
+        submitted_alternatives: list[QuestionAlternative],
+        bank_alternatives: list[dict[str, Any]],
+    ) -> list[QuestionAlternative]:
+        if not bank_alternatives:
+            return submitted_alternatives
+
+        submitted_by_label = {alternative.label: alternative for alternative in submitted_alternatives}
+        merged: list[QuestionAlternative] = []
+        for item in bank_alternatives:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip().upper()
+            if not label:
+                continue
+            fallback = submitted_by_label.get(label)
+            text = str(item.get("text") or (fallback.text if fallback is not None else "")).strip()
+            explanation = str(
+                item.get("explanation")
+                or item.get("rationale")
+                or item.get("why_wrong")
+                or item.get("feedback")
+                or ""
+            ).strip()
+            if text:
+                merged.append(QuestionAlternative(label=label, text=text, explanation=explanation))
+
+        return merged if len(merged) >= 4 else submitted_alternatives

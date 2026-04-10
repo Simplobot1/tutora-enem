@@ -31,6 +31,11 @@ class FakeQuestionsRepository(QuestionsRepository):
         return self.match
 
 
+class FakeApkgBuilder:
+    def build_apkg_from_session(self, session) -> str:
+        return f"/tmp/{session.session_id}.apkg"
+
+
 COMPLETE_QUESTION = (
     "Qual das verminoses a seguir apresenta as mesmas medidas preventivas?\n"
     "A Teníase.\n"
@@ -63,7 +68,7 @@ class SocraticModeNotTiredTest(unittest.IsolatedAsyncioTestCase):
                 }
             ),
         )
-        self.socratico_service = SocraticoService()
+        self.socratico_service = SocraticoService(apkg_builder=FakeApkgBuilder())
         self.answer_service = MeTestaAnswerService(
             repository=self.repository,
             socratico_service=self.socratico_service,
@@ -77,8 +82,8 @@ class SocraticModeNotTiredTest(unittest.IsolatedAsyncioTestCase):
             socratico_service=self.socratico_service,
         )
 
-    async def test_socratic_flow_q1_then_q2_then_done(self) -> None:
-        """Test: incorrect answer → Q1 → Q2 → explanation → DONE."""
+    async def test_socratic_flow_wrong_then_retry_correct_then_done(self) -> None:
+        """Test: incorrect answer → forced retry → DONE when corrected."""
         # Step 1: Intake question
         intake_event = self.intake.normalize_update(
             {
@@ -107,10 +112,9 @@ class SocraticModeNotTiredTest(unittest.IsolatedAsyncioTestCase):
         )
         q1_result = await self.service.handle_event(wrong_answer_event)
 
-        # Should receive Q1
+        # Should receive retry prompt
         self.assertEqual(q1_result.state, SessionState.WAITING_SOCRATIC_Q1)
-        self.assertIn("refletir", q1_result.reply_text.lower())
-        self.assertIn("palavra-chave", q1_result.reply_text.lower())
+        self.assertIn("responde de novo", q1_result.reply_text.lower())
 
         # Verify error was classified and review_card was prepared
         session = self.session_service.repository.get_active_session(123, SessionFlow.ME_TESTA)  # type: ignore[attr-defined]
@@ -118,42 +122,23 @@ class SocraticModeNotTiredTest(unittest.IsolatedAsyncioTestCase):
         assert session is not None
         self.assertIsNotNone(session.metadata.review_card)
 
-        # Step 3: Respond to Q1 → Q2
-        q1_response_event = self.intake.normalize_update(
+        # Step 3: Respond to Q1 with corrected answer → DONE
+        retry_response_event = self.intake.normalize_update(
             {
                 "update_id": 3,
                 "message": {
                     "message_id": 102,
-                    "text": "A palavra-chave é prevenção",
+                    "text": "E",
                     "chat": {"id": 321},
                     "from": {"id": 123},
                 },
             }
         )
-        q2_result = await self.service.handle_event(q1_response_event)
+        retry_result = await self.service.handle_event(retry_response_event)
 
-        # Should receive Q2
-        self.assertEqual(q2_result.state, SessionState.WAITING_SOCRATIC_Q2)
-        self.assertIn("alternativa", q2_result.reply_text.lower())
-
-        # Step 4: Respond to Q2 → Explanation
-        q2_response_event = self.intake.normalize_update(
-            {
-                "update_id": 4,
-                "message": {
-                    "message_id": 103,
-                    "text": "Acho que é E",
-                    "chat": {"id": 321},
-                    "from": {"id": 123},
-                },
-            }
-        )
-        explanation_result = await self.service.handle_event(q2_response_event)
-
-        # Should provide explanation and go to DONE
-        self.assertEqual(explanation_result.state, SessionState.DONE)
-        self.assertIn("resposta correta", explanation_result.reply_text.lower())
-        self.assertIn("E", explanation_result.reply_text)
+        self.assertEqual(retry_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
+        self.assertIn("agora foi", retry_result.reply_text.lower())
+        self.assertIn("virada no seu raciocínio", retry_result.reply_text.lower())
 
 
 class SocraticModeTiredTest(unittest.IsolatedAsyncioTestCase):
@@ -178,7 +163,7 @@ class SocraticModeTiredTest(unittest.IsolatedAsyncioTestCase):
                 }
             ),
         )
-        self.socratico_service = SocraticoService()
+        self.socratico_service = SocraticoService(apkg_builder=FakeApkgBuilder())
         self.answer_service = MeTestaAnswerService(
             repository=self.repository,
             socratico_service=self.socratico_service,
@@ -230,7 +215,7 @@ class SocraticModeTiredTest(unittest.IsolatedAsyncioTestCase):
         result = await self.service.handle_event(wrong_answer_event)
 
         # Should skip Socratic and go directly to DONE
-        self.assertEqual(result.state, SessionState.DONE)
+        self.assertEqual(result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertIn("resposta correta", result.reply_text.lower())
         self.assertIn("E", result.reply_text)
         # Should not see Q1 markers
@@ -259,7 +244,7 @@ class SocraticIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 }
             ),
         )
-        self.socratico_service = SocraticoService()
+        self.socratico_service = SocraticoService(apkg_builder=FakeApkgBuilder())
         self.answer_service = MeTestaAnswerService(
             repository=self.repository,
             socratico_service=self.socratico_service,
@@ -344,7 +329,7 @@ class SocraticIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         await self.service.handle_event(wrong_answer_event)
 
-        # Q1 response → Q2
+        # Invalid retry answer → Q2
         q1_response_event = self.intake.normalize_update(
             {
                 "update_id": 11,
@@ -356,7 +341,9 @@ class SocraticIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 },
             }
         )
-        await self.service.handle_event(q1_response_event)
+        q2_result = await self.service.handle_event(q1_response_event)
+        self.assertEqual(q2_result.state, SessionState.WAITING_SOCRATIC_Q2)
+        self.assertIn("responde só com a, b, c, d ou e", q2_result.reply_text.lower())
 
         # Q2 response → DONE
         q2_response_event = self.intake.normalize_update(
@@ -364,14 +351,14 @@ class SocraticIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 "update_id": 12,
                 "message": {
                     "message_id": 111,
-                    "text": "resposta2",
+                    "text": "E",
                     "chat": {"id": 324},
                     "from": {"id": 126},
                 },
             }
         )
         done_result = await self.service.handle_event(q2_response_event)
-        self.assertEqual(done_result.state, SessionState.DONE)
+        self.assertEqual(done_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
 
         # New question (DONE → new intake)
         new_question_event = self.intake.normalize_update(
@@ -393,7 +380,7 @@ class SocraticServiceDirectTest(unittest.IsolatedAsyncioTestCase):
     """Test SocraticoService methods directly (without full integration)."""
 
     def setUp(self) -> None:
-        self.service = SocraticoService()
+        self.service = SocraticoService(apkg_builder=FakeApkgBuilder())
         self.repository = InMemoryStudySessionsRepository()
 
     async def test_q1_generation(self) -> None:
@@ -433,7 +420,7 @@ class SocraticServiceDirectTest(unittest.IsolatedAsyncioTestCase):
         result = await self.service.generate_q1(session)
 
         self.assertEqual(result.state, SessionState.WAITING_SOCRATIC_Q1)
-        self.assertIn("refletir", result.reply_text.lower())
+        self.assertIn("responde de novo", result.reply_text.lower())
 
     async def test_direct_explanation_path(self) -> None:
         """Test skipping to direct explanation."""
@@ -472,6 +459,6 @@ class SocraticServiceDirectTest(unittest.IsolatedAsyncioTestCase):
 
         result = await self.service.skip_to_direct_explanation(session)
 
-        self.assertEqual(result.state, SessionState.DONE)
+        self.assertEqual(result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertIn("B", result.reply_text)
         self.assertIn("Explicação", result.reply_text)
