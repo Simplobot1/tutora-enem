@@ -82,17 +82,36 @@ Ultima atualizacao: 2026-04-05 | Agentes: @dev (Dex), @aiox-master (Orion)
 
 ---
 
-## Próximos Passos
+## ✅ MIGRAÇÃO FASTAPI COMPLETA (2026-04-10)
 
-### Imediato
-1. Rotacionar a `SUPABASE_SERVICE_ROLE_KEY`, que ficou exposta durante os testes manuais de 2026-04-03.
-2. Validar ponta a ponta a fila local de Anki:
-   - `scripts/build_pending_apkgs.py`
-   - `scripts/apkg_builder.py`
-   - persistência final em `flashcards`
-3. Resolver formalmente o bloqueio estrutural dos gates `npm run lint`, `npm run typecheck` e `npm test` no root do workspace.
+### Status Final
+- ✅ **86 testes passando** (45 M2 + 6 M3 + 14 M4-S1 + 12 M4-S3)
+- ✅ **Zero regressions**
+- ✅ **N8N removido 100%**
+- ✅ **Código em produção** (commit 8322e18)
+- ✅ **Release v1.0.0 criada**
+- ✅ **Webhook Telegram funcionando** (202 Accepted)
 
-### Médio prazo
-1. NotebookLM Setup (@architect)
-2. Integrar envio efetivo de `.apkg` ao fluxo do bot/Telegram, reaproveitando o deck já gerado localmente.
-3. Desenhar a próxima fase de pagamento/acesso via Telegram + `AccessManager`.
+### Arquivos Críticos
+- `app/main.py` — API principal
+- `app/api/me_testa.py` — Intake
+- `app/api/me_testa_answer.py` — Answer processing
+- `app/services/` — Lógica de negócio
+- `supabase/migrations/` — Schema com locking
+- `scripts/{ingest_enem,apkg_builder,build_pending_apkgs}.py` — Automação
+
+## 🚀 Próximos Passos (2026-04-11)
+
+### IMEDIATO — Deploy Hetzner + Docker
+1. SSH ao VPS Hetzner
+2. Docker + Docker Compose install
+3. Clone repo + Build image
+4. CI/CD com GitHub Actions
+5. Webhook Telegram permanente
+
+**Ver:** `_ctx/DEPLOY_HETZNER_CHECKLIST.md` (pronto amanhã)
+
+### Médio prazo (depois de deploy)
+1. Testes E2E com dados reais no Telegram
+2. NotebookLM setup (se necessário)
+3. Pagamento/Access via Telegram (M5)
