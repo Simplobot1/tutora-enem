@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
-"""
-build_pending_apkgs.py — gera decks .apkg pendentes enfileirados pelo workflow do bot.
+"""Build pending APKG files from queued sessions (M4-S1).
+
+M4-S1: Reads sessions with anki_status = queued_local_build and generates .apkg files.
 
 Fluxo:
-  study_sessions.metadata.anki_status = queued_local_build
-    -> busca question_id ou review_card + telegram_id
-    -> chama apkg_builder.py
-    -> atualiza metadata para prepared ou generation_failed
+  study_sessions.metadata.anki.status = queued_local_build
+    -> busca review_card
+    -> chama ApkgBuilderService para gerar .apkg
+    -> atualiza metadata para built
+
+Usage:
+    python scripts/build_pending_apkgs.py [--limit 20] [--output-dir /path]
+    python scripts/build_pending_apkgs.py --dry-run
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 def _require_env(key: str) -> str:
