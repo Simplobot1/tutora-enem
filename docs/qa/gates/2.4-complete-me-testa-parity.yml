@@ -1,0 +1,12 @@
+schema: 1
+story: '2.4'
+gate: PASS
+status_reason: 'Todos os 8 critérios de aceite atendidos. 104 testes cobrindo ambos os caminhos (bank_match e student_submitted), RLS e segurança verificados, sem regressões em M2-S2/S3.'
+reviewer: Quinn
+updated: '2026-04-10T23:00:00-03:00'
+top_issues:
+  - id: MNT-001
+    severity: low
+    finding: 'Story marcada como Done antes do QA gate formal ser executado'
+    suggested_action: 'Futuramente, usar status InReview até conclusão do gate'
+waiver: { active: false }
