@@ -114,8 +114,8 @@ class CompleteParityBankMatchTest(unittest.IsolatedAsyncioTestCase):
         )
 
         answer_result = await self.service.handle_event(answer_event)
-        self.assertEqual(answer_result.state, SessionState.DONE)
-        self.assertIn("Parabéns", answer_result.reply_text)
+        self.assertEqual(answer_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
+        self.assertIn("você acertou", answer_result.reply_text.lower())
         self.assertEqual(answer_result.metadata["is_correct"], True)
 
     async def test_complete_bank_match_path_incorrect_answer(self) -> None:
@@ -151,7 +151,7 @@ class CompleteParityBankMatchTest(unittest.IsolatedAsyncioTestCase):
 
         answer_result = await self.service.handle_event(answer_event)
         self.assertEqual(answer_result.state, SessionState.EXPLAINING_DIRECT)
-        self.assertIn("Infelizmente", answer_result.reply_text)
+        self.assertIn("Ainda não foi dessa vez", answer_result.reply_text)
         self.assertEqual(answer_result.metadata["is_correct"], False)
         self.assertIsNotNone(answer_result.metadata["error_type"])
         self.assertIsNotNone(answer_result.metadata["review_card_id"])
@@ -206,10 +206,10 @@ class CompleteParityStudentSubmittedTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(intake_result.state, SessionState.WAITING_ANSWER)
         self.assertEqual(intake_result.metadata["source_mode"], "student_submitted")
         self.assertIsNone(intake_result.metadata["question_id"])
-        self.assertIn("Agora me diga a alternativa", intake_result.reply_text)
+        self.assertIn("Agora me conta qual alternativa você marcou", intake_result.reply_text)
 
-    async def test_student_submitted_without_bank_match_answer_handling(self) -> None:
-        """Test: student_submitted mode → answer submitted (no correct answer known)."""
+    async def test_student_submitted_without_bank_match_requests_gabarito(self) -> None:
+        """Test: student_submitted mode without bank match must request gabarito instead of guessing."""
         # Step 1: intake complete question
         intake_event = self.intake.normalize_update(
             {
@@ -226,9 +226,7 @@ class CompleteParityStudentSubmittedTest(unittest.IsolatedAsyncioTestCase):
         intake_result = await self.service.handle_event(intake_event)
         self.assertEqual(intake_result.state, SessionState.WAITING_ANSWER)
 
-        # Step 2: submit answer (no bank match, so answer is classified as incorrect)
-        # This is expected behavior: without a bank_match or AI evaluation,
-        # we treat it as incorrect and prepare for review
+        # Step 2: submit answer without known gabarito
         answer_event = self.intake.normalize_update(
             {
                 "update_id": 8,
@@ -242,9 +240,8 @@ class CompleteParityStudentSubmittedTest(unittest.IsolatedAsyncioTestCase):
         )
 
         answer_result = await self.service.handle_event(answer_event)
-        # Without correct_alternative, answer is treated as incorrect
-        self.assertEqual(answer_result.state, SessionState.EXPLAINING_DIRECT)
-        self.assertEqual(answer_result.metadata["is_correct"], False)
+        self.assertEqual(answer_result.state, SessionState.WAITING_GABARITO)
+        self.assertTrue(answer_result.metadata["needs_gabarito"])
 
 
 class FallbackDetailsFlowTest(unittest.IsolatedAsyncioTestCase):
@@ -295,7 +292,7 @@ class FallbackDetailsFlowTest(unittest.IsolatedAsyncioTestCase):
 
         incomplete_result = await self.service.handle_event(incomplete_event)
         self.assertEqual(incomplete_result.state, SessionState.WAITING_FALLBACK_DETAILS)
-        self.assertIn("Ainda faltam dados", incomplete_result.reply_text)
+        self.assertIn("Ainda não consegui montar a questão inteira", incomplete_result.reply_text)
 
         # Step 2: send fallback details (complete question with bank match)
         fallback_event = self.intake.normalize_update(
@@ -312,7 +309,7 @@ class FallbackDetailsFlowTest(unittest.IsolatedAsyncioTestCase):
 
         fallback_result = await self.service.handle_event(fallback_event)
         self.assertEqual(fallback_result.state, SessionState.WAITING_ANSWER)
-        self.assertIn("Agora me diga", fallback_result.reply_text)
+        self.assertIn("Agora me conta qual alternativa você marcou", fallback_result.reply_text)
         # Verify bank match was found
         self.assertEqual(fallback_result.metadata["source_mode"], "bank_match")
 
@@ -330,7 +327,7 @@ class FallbackDetailsFlowTest(unittest.IsolatedAsyncioTestCase):
         )
 
         answer_result = await self.service.handle_event(answer_event)
-        self.assertEqual(answer_result.state, SessionState.DONE)
+        self.assertEqual(answer_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertEqual(answer_result.metadata["is_correct"], True)
 
 
@@ -393,10 +390,10 @@ class FollowUpQuestionsTest(unittest.IsolatedAsyncioTestCase):
             }
         )
         q1_result = await self.service.handle_event(q1_answer)
-        self.assertEqual(q1_result.state, SessionState.DONE)
+        self.assertEqual(q1_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertEqual(q1_result.metadata["is_correct"], True)
 
-        # Follow-up: new question (DONE → intake)
+        # Follow-up: new question (follow-up chat → intake)
         # Same question for simplicity (bank match will find it again)
         q2_event = self.intake.normalize_update(
             {
@@ -547,5 +544,5 @@ class InvalidAnswerHandlingTest(unittest.IsolatedAsyncioTestCase):
             }
         )
         result = await self.service.handle_event(answer_event)
-        self.assertEqual(result.state, SessionState.DONE)
+        self.assertEqual(result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertEqual(result.metadata["is_correct"], True)

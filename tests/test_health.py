@@ -22,6 +22,7 @@ def build_test_runtime() -> RuntimeServices:
         session_service=object(),
         entry_service=object(),
         me_testa_service=StubMeTestaService(),
+        telegram_gateway=object(),
     )
 
 

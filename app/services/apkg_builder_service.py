@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -28,10 +27,10 @@ class ApkgBuilderService:
         """Initialize builder with optional output directory.
 
         Args:
-            output_dir: Directory to save .apkg files. If None, uses /tmp.
+            output_dir: Directory to save .apkg files. If None, uses
+                materiais/flashcards/telegram_<id>.
         """
-        self.output_dir = output_dir or tempfile.gettempdir()
-        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        self.output_dir = output_dir
 
     def build_apkg_from_session(self, session: SessionRecord) -> str | None:
         """Build .apkg file from session's review_card.
@@ -51,9 +50,10 @@ class ApkgBuilderService:
             logger.warning(f"session={session.session_id} has empty review_card")
             return None
 
-        return self._build_deck(session, review_card)
+        output_dir = self._resolve_output_dir(session)
+        return self._build_deck(session, review_card, output_dir)
 
-    def _build_deck(self, session: SessionRecord, review_card: ReviewCard) -> str:
+    def _build_deck(self, session: SessionRecord, review_card: ReviewCard, output_dir: Path) -> str:
         """Build and save an Anki deck (.apkg file).
 
         Args:
@@ -105,12 +105,20 @@ class ApkgBuilderService:
         # Save to file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"tutora_{session.session_id}_{timestamp}.apkg"
-        filepath = str(Path(self.output_dir) / filename)
+        filepath = str(output_dir / filename)
 
-        deck.write_to_file(filepath)
+        genanki.Package(deck).write_to_file(filepath)
         logger.info(f"built apkg={filepath} for session={session.session_id}")
 
         return filepath
+
+    def _resolve_output_dir(self, session: SessionRecord) -> Path:
+        if self.output_dir:
+            path = Path(self.output_dir)
+        else:
+            path = Path.cwd() / "materiais" / "flashcards" / f"telegram_{session.telegram_id}"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     def _hash_to_deck_id(self, session_id: str) -> int:
         """Convert session_id to stable deck ID (positive integer).

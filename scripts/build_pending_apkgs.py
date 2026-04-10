@@ -20,6 +20,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -56,6 +57,11 @@ def _anki_metadata(metadata: dict) -> dict:
 def _question_ref(metadata: dict) -> dict:
     question_ref = metadata.get("question_ref")
     return question_ref if isinstance(question_ref, dict) else {}
+
+
+def _snapshot_id(metadata: dict) -> str:
+    question_ref = _question_ref(metadata)
+    return str(question_ref.get("snapshot_id") or "").strip()
 
 
 def _review_card(metadata: dict) -> dict:
@@ -96,7 +102,6 @@ def fetch_pending_sessions(sb, limit: int) -> list[dict]:
     result = (
         sb.table("study_sessions")
         .select("id,telegram_id,metadata")
-        .eq("status", "completed")
         .execute()
     )
     rows = result.data or []
@@ -117,6 +122,18 @@ def fetch_pending_sessions(sb, limit: int) -> list[dict]:
 
 def update_session(sb, session_id: str, metadata: dict) -> None:
     sb.table("study_sessions").update({"metadata": metadata}).eq("id", session_id).execute()
+
+
+def update_submitted_question(sb, metadata: dict, *, sent_to_anki: bool, apkg_generated: bool, apkg_path: str | None) -> None:
+    snapshot_id = _snapshot_id(metadata)
+    if not snapshot_id:
+        return
+    payload = {
+        "sent_to_anki": sent_to_anki,
+        "apkg_generated": apkg_generated,
+        "apkg_path": apkg_path,
+    }
+    sb.table("submitted_questions").update(payload).eq("id", snapshot_id).execute()
 
 
 def run_builder(metadata: dict, telegram_id: int) -> dict:
@@ -210,6 +227,13 @@ def main() -> int:
                 }
             )
             print(f"[OK] Deck preparado: {payload.get('apkg_path')}")
+            update_submitted_question(
+                sb,
+                updated,
+                sent_to_anki=True,
+                apkg_generated=True,
+                apkg_path=payload.get("apkg_path"),
+            )
         else:
             updated_anki.update(
                 {
@@ -231,6 +255,13 @@ def main() -> int:
                 }
             )
             print(f"[WARN] Falha ao gerar deck para session={session_id[:8]}")
+            update_submitted_question(
+                sb,
+                updated,
+                sent_to_anki=True,
+                apkg_generated=False,
+                apkg_path=None,
+            )
         update_session(sb, session_id, updated)
 
     return 0
