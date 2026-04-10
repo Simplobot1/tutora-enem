@@ -3,6 +3,8 @@ python-dotenv
 pymupdf
 genanki
 httpx
-asyncio
 notebooklm-py
 playwright
+supabase
+fastapi
+uvicorn

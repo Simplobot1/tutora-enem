@@ -1,0 +1,108 @@
+{
+  "schema": "aiox-gotchas-memory-v1",
+  "version": "1.0.0",
+  "projectId": "tutora",
+  "lastUpdated": "2026-04-03T04:08:40Z",
+  "statistics": {
+    "totalGotchas": 3,
+    "resolved": 0,
+    "unresolved": 3,
+    "byCategory": {
+      "build": 1,
+      "test": 1,
+      "lint": 0,
+      "runtime": 0,
+      "integration": 1,
+      "security": 0,
+      "general": 0
+    },
+    "bySeverity": {
+      "critical": 3,
+      "warning": 0,
+      "info": 0
+    },
+    "bySource": {
+      "manual": 3,
+      "auto_detected": 0
+    },
+    "trackedErrors": 0,
+    "pendingAutoCapture": 0
+  },
+  "gotchas": [
+    {
+      "id": "gotcha-story-0-2-gates-blocked",
+      "title": "Story 0.2 sem fechamento real por ausência de package.json e validação E2E parcial",
+      "description": "A implementação local cobre os critérios principais, mas o fechamento real não pode ser aceito enquanto os gates obrigatórios `npm run lint`, `npm run typecheck` e `npm test` continuarem bloqueados por ausência de `package.json`. A validação manual ponta a ponta também segue pendente ou parcial, então qualquer status final precisa refletir essa lacuna de evidência.",
+      "category": "build",
+      "severity": "critical",
+      "workaround": "Não marcar como concluída até restaurar a capacidade de executar os três gates obrigatórios no repositório e anexar evidência de validação manual ponta a ponta completa.",
+      "relatedFiles": [
+        "package.json",
+        "docs/stories/"
+      ],
+      "trigger": {
+        "errorPattern": "story 0.2 approved sem lint/typecheck/test e sem validacao ponta a ponta completa"
+      },
+      "source": {
+        "type": "manual",
+        "occurrences": 1,
+        "firstSeen": "2026-04-03T04:08:40Z",
+        "lastSeen": "2026-04-03T04:08:40Z"
+      },
+      "resolved": false,
+      "resolvedAt": null,
+      "resolvedBy": null,
+      "createdAt": "2026-04-03T04:08:40Z"
+    },
+    {
+      "id": "gotcha-story-0-3-fallback-validation-partial",
+      "title": "Story 0.3 com fallback multimodal sólido no código, mas validação assistida real ainda parcial",
+      "description": "O fallback multimodal está bem sustentado no código e nos testes locais, porém ainda existe risco operacional porque a validação assistida em ambiente real está apenas parcial, especialmente nos ramos críticos do fallback. Além disso, os gates obrigatórios do projeto continuam bloqueados, então a evidência atual não fecha o risco operacional.",
+      "category": "integration",
+      "severity": "critical",
+      "workaround": "Executar validação assistida real cobrindo os ramos críticos do fallback e só então considerar a story encerrada, junto com restauração dos gates obrigatórios do projeto.",
+      "relatedFiles": [
+        "tests/",
+        "docs/stories/"
+      ],
+      "trigger": {
+        "errorPattern": "story 0.3 fallback validado apenas parcialmente em ambiente real"
+      },
+      "source": {
+        "type": "manual",
+        "occurrences": 1,
+        "firstSeen": "2026-04-03T04:08:40Z",
+        "lastSeen": "2026-04-03T04:08:40Z"
+      },
+      "resolved": false,
+      "resolvedAt": null,
+      "resolvedBy": null,
+      "createdAt": "2026-04-03T04:08:40Z"
+    },
+    {
+      "id": "gotcha-story-0-4-approved-inconsistent",
+      "title": "Story 0.4 marcada como Approved apesar de faltarem concept_card, persistência e adaptação do apkg_builder",
+      "description": "A story 0.4 não está implementada no estado atual do código. Não há geração de `concept_card`, persistência de `concept/front/back`, adaptação do `apkg_builder` para esse modelo, nem testes e evidências reais. O status `Approved` está inconsistente com o estado do código e não deve ser tratado como sinal de entrega concluída.",
+      "category": "test",
+      "severity": "critical",
+      "workaround": "Rebaixar o status funcional da story até existir implementação verificável, persistência compatível, adaptação do builder e evidências reais de teste cobrindo o fluxo.",
+      "relatedFiles": [
+        "docs/stories/",
+        "tests/"
+      ],
+      "trigger": {
+        "errorPattern": "story 0.4 approved sem implementacao real de concept_card e apkg_builder"
+      },
+      "source": {
+        "type": "manual",
+        "occurrences": 1,
+        "firstSeen": "2026-04-03T04:08:40Z",
+        "lastSeen": "2026-04-03T04:08:40Z"
+      },
+      "resolved": false,
+      "resolvedAt": null,
+      "resolvedBy": null,
+      "createdAt": "2026-04-03T04:08:40Z"
+    }
+  ]
+}

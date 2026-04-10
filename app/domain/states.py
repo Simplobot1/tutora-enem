@@ -1,0 +1,22 @@
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class SessionFlow(StrEnum):
+    ME_TESTA = "me_testa"
+    SOCRATICO = "socratico"
+    CHECK_IN = "check_in"
+
+
+class SessionState(StrEnum):
+    IDLE = "IDLE"
+    WAITING_FALLBACK_DETAILS = "WAITING_FALLBACK_DETAILS"
+    WAITING_ANSWER = "WAITING_ANSWER"
+    EVALUATING_ANSWER = "EVALUATING_ANSWER"
+    WAITING_SOCRATIC_Q1 = "WAITING_SOCRATIC_Q1"
+    WAITING_SOCRATIC_Q2 = "WAITING_SOCRATIC_Q2"
+    EXPLAINING_DIRECT = "EXPLAINING_DIRECT"
+    DONE = "DONE"
+    FAILED_RETRYABLE = "FAILED_RETRYABLE"
+
