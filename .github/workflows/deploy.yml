@@ -1,0 +1,82 @@
+name: Deploy to Hetzner VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Testes antes do deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Rodar testes
+        run: python -m pytest tests/test_health.py tests/test_models_and_webhook.py -v
+
+  deploy:
+    name: Deploy via SSH
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Deploy no VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            # Salva commit atual para rollback
+            PREV_COMMIT=$(git rev-parse HEAD)
+            echo "Commit anterior: $PREV_COMMIT" > /tmp/tutora_prev_commit
+
+            # Atualiza código
+            git pull origin main
+
+            # Rebuild e restart do container
+            docker compose up -d --build --remove-orphans
+
+            # Aguarda API subir (até 30s)
+            echo "Aguardando healthcheck..."
+            for i in $(seq 1 10); do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health || echo "000")
+              if [ "$STATUS" = "200" ]; then
+                echo "Healthcheck OK (tentativa $i)"
+                exit 0
+              fi
+              echo "Tentativa $i: status=$STATUS — aguardando 3s..."
+              sleep 3
+            done
+
+            # Healthcheck falhou → rollback automático
+            echo "Healthcheck falhou após 30s. Iniciando rollback para $PREV_COMMIT..."
+            git checkout "$PREV_COMMIT"
+            docker compose up -d --build --remove-orphans
+            echo "Rollback concluído. Verificando..."
+            curl -sf http://127.0.0.1:8000/health && echo "Rollback bem-sucedido." || echo "ERRO: rollback também falhou!"
+            exit 1
+
+      - name: Validação pós-deploy (externo)
+        run: |
+          echo "Validando endpoint público..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.DEPLOY_HOST }}/health || echo "000")
+          if [ "$STATUS" = "200" ]; then
+            echo "Deploy validado — /health respondeu 200"
+          else
+            echo "ERRO: /health retornou $STATUS"
+            exit 1
+          fi

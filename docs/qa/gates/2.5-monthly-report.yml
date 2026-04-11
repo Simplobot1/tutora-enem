@@ -1,0 +1,8 @@
+schema: 1
+story: '2.5'
+gate: PASS
+status_reason: 'Todos os 7 critérios de aceite atendidos. 22 novos testes (126 total), fast-path seguro no webhook, input sanitizado, queries parametrizadas, sem regressões.'
+reviewer: Quinn
+updated: '2026-04-10T23:30:00-03:00'
+top_issues: []
+waiver: { active: false }
