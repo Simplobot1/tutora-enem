@@ -5,13 +5,16 @@ M2-S3: Handle answer submission, error classification, and review card preparati
 
 from __future__ import annotations
 
+import re
 from uuid import uuid4
 
 from app.domain.error_classification import ErrorClassification, ErrorType
 from app.domain.models import ServiceResult, SessionRecord
 from app.domain.session_metadata import AnkiMetadata, ReviewCard, SessionMetadata
 from app.domain.states import SessionState
+from app.repositories.submitted_questions_repository import SubmittedQuestionsRepository
 from app.repositories.study_sessions_repository import StudySessionsRepository
+from app.services.alternative_explanation_service import AlternativeExplanationService
 from app.services.socratico_service import SocraticoService
 
 
@@ -29,9 +32,12 @@ class MeTestaAnswerService:
         self,
         repository: StudySessionsRepository,
         socratico_service: SocraticoService | None = None,
+        submitted_questions_repository: SubmittedQuestionsRepository | None = None,
     ) -> None:
         self.repository = repository
         self.socratico_service = socratico_service
+        self.submitted_questions_repository = submitted_questions_repository
+        self.alternative_explanation_service = AlternativeExplanationService()
 
     async def process_answer(
         self,
@@ -52,7 +58,7 @@ class MeTestaAnswerService:
         if session.question_snapshot is None:
             return ServiceResult(
                 state=SessionState.FAILED_RETRYABLE,
-                reply_text="Erro: nenhuma questão ativa",
+                reply_text="Eu me perdi da questão anterior aqui. Me manda de novo que eu retomo com você.",
                 should_reply=True,
             )
 
@@ -64,8 +70,28 @@ class MeTestaAnswerService:
         if student_answer_upper not in "ABCDE":
             return ServiceResult(
                 state=SessionState.WAITING_ANSWER,
-                reply_text="Por favor, responda com A, B, C, D ou E.",
+                reply_text="Me responde só com a letra da alternativa: A, B, C, D ou E.",
                 should_reply=True,
+            )
+
+        if not correct_answer:
+            if not isinstance(session.metadata, SessionMetadata):
+                raise TypeError("session.metadata must be SessionMetadata")
+            session.state = SessionState.WAITING_GABARITO
+            session.metadata.state = SessionState.WAITING_GABARITO
+            session.metadata.pending_student_answer = student_answer_upper
+            self.repository.save(session)
+            return ServiceResult(
+                state=SessionState.WAITING_GABARITO,
+                reply_text=(
+                    "Ainda não confirmei o gabarito dessa questão, então prefiro não te corrigir no escuro.\n\n"
+                    "Me manda o gabarito no formato `gabarito: A` que eu continuo com segurança."
+                ),
+                should_reply=True,
+                metadata={
+                    "needs_gabarito": True,
+                    "session_id": session.session_id,
+                },
             )
 
         # Check if answer is correct
@@ -78,19 +104,98 @@ class MeTestaAnswerService:
                 session, student_answer_upper, correct_answer
             )
 
+    async def process_gabarito(
+        self,
+        session: SessionRecord,
+        gabarito_input: str,
+    ) -> ServiceResult:
+        if session.question_snapshot is None:
+            return ServiceResult(
+                state=SessionState.FAILED_RETRYABLE,
+                reply_text="Eu me perdi da questão anterior aqui. Me manda de novo que eu retomo com você.",
+                should_reply=True,
+            )
+        if not isinstance(session.metadata, SessionMetadata):
+            raise TypeError("session.metadata must be SessionMetadata")
+
+        parsed = self._parse_alternative(gabarito_input)
+        if parsed is None:
+            return ServiceResult(
+                state=SessionState.WAITING_GABARITO,
+                reply_text="Não consegui identificar o gabarito ainda. Me manda no formato `gabarito: A`.",
+                should_reply=True,
+            )
+
+        session.question_snapshot.correct_alternative = parsed
+        pending_student_answer = session.metadata.pending_student_answer
+        session.metadata.pending_student_answer = None
+        snapshot_id = session.metadata.question_ref.snapshot_id
+        if self.submitted_questions_repository is not None and snapshot_id:
+            self.submitted_questions_repository.sync_snapshot(snapshot_id, session.question_snapshot)
+        self.repository.save(session)
+
+        if pending_student_answer:
+            return await self.process_answer(
+                telegram_id=session.telegram_id,
+                student_answer=pending_student_answer,
+                session=session,
+            )
+
+        session.state = SessionState.WAITING_ANSWER
+        session.metadata.state = SessionState.WAITING_ANSWER
+        self.repository.save(session)
+        return ServiceResult(
+            state=SessionState.WAITING_ANSWER,
+            reply_text="Perfeito, agora eu tenho o gabarito. Me conta qual alternativa você marcou.",
+            should_reply=True,
+            metadata={
+                "session_id": session.session_id,
+                "correct_alternative": parsed,
+            },
+        )
+
     async def _handle_correct_answer(self, session: SessionRecord) -> ServiceResult:
         """Handle case where student answered correctly."""
         if not isinstance(session.metadata, SessionMetadata):
             raise TypeError("session.metadata must be SessionMetadata")
 
-        session.state = SessionState.DONE
-        session.metadata.state = SessionState.DONE
+        snapshot = session.question_snapshot
+        if snapshot is not None:
+            self.alternative_explanation_service.ensure_alternative_explanations(session)
+        session.state = SessionState.WAITING_FOLLOWUP_CHAT
+        session.metadata.state = SessionState.WAITING_FOLLOWUP_CHAT
         session.metadata.anki = AnkiMetadata(status="not_needed")
+        session.metadata.review_card = ReviewCard()
+        session.metadata.retry_attempts = 0
         self.repository.save(session)
+        self._sync_submitted_question_snapshot(session)
+        self._mark_submitted_question_result(
+            session=session,
+            answered_correct=True,
+            sent_to_anki=False,
+            apkg_generated=False,
+        )
+        alternatives_review = self._build_alternatives_review(snapshot, snapshot.correct_alternative or "") if snapshot is not None else ""
 
         return ServiceResult(
-            state=SessionState.DONE,
-            reply_text="✅ Parabéns! Você acertou!",
+            state=SessionState.WAITING_FOLLOWUP_CHAT,
+            reply_text="\n".join(
+                [
+                    "✅ Boa! Você acertou essa.",
+                    "",
+                    "Gostei de ver você chegando na resposta certa.",
+                    "",
+                    "Aqui vai a questão comentada para firmar o raciocínio:",
+                    "",
+                    (
+                        alternatives_review
+                        if alternatives_review
+                        else "Ainda não tenho uma explicação detalhada por alternativa para essa questão."
+                    ),
+                    "",
+                    "Se preferir, já me manda a próxima questão.",
+                ]
+            ),
             should_reply=True,
             metadata={
                 "is_correct": True,
@@ -138,8 +243,9 @@ class MeTestaAnswerService:
         session.metadata.review_card = review_card
         session.metadata.anki = AnkiMetadata(
             status="queued_local_build",
-            builder_mode="append_to_deck",
+            builder_mode="review_card",
         )
+        session.metadata.retry_attempts = 1
 
         # Route to Socratic mode if available, else go direct
         if self.socratico_service is not None:
@@ -163,6 +269,13 @@ class MeTestaAnswerService:
             session.state = SessionState.EXPLAINING_DIRECT
             session.metadata.state = SessionState.EXPLAINING_DIRECT
             self.repository.save(session)
+            self._mark_submitted_question_result(
+                session=session,
+                answered_correct=False,
+                sent_to_anki=True,
+                apkg_generated=False,
+                error_type=error_classification.error_type.value if error_classification.error_type else None,
+            )
 
             # Build feedback message
             feedback = self._build_feedback_message(
@@ -184,6 +297,39 @@ class MeTestaAnswerService:
                 },
             )
 
+    def _mark_submitted_question_result(
+        self,
+        *,
+        session: SessionRecord,
+        answered_correct: bool,
+        sent_to_anki: bool,
+        apkg_generated: bool,
+        apkg_path: str | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        if not isinstance(session.metadata, SessionMetadata):
+            return
+        snapshot_id = session.metadata.question_ref.snapshot_id
+        if self.submitted_questions_repository is None or not snapshot_id:
+            return
+        self.submitted_questions_repository.mark_result(
+            snapshot_id,
+            answered_correct=answered_correct,
+            retry_attempts=session.metadata.retry_attempts,
+            sent_to_anki=sent_to_anki,
+            apkg_generated=apkg_generated,
+            apkg_path=apkg_path,
+            error_type=error_type,
+        )
+
+    def _sync_submitted_question_snapshot(self, session: SessionRecord) -> None:
+        if not isinstance(session.metadata, SessionMetadata):
+            return
+        snapshot_id = session.metadata.question_ref.snapshot_id
+        if self.submitted_questions_repository is None or not snapshot_id or session.question_snapshot is None:
+            return
+        self.submitted_questions_repository.sync_snapshot(snapshot_id, session.question_snapshot)
+
     def _build_review_card(
         self,
         snapshot,
@@ -192,28 +338,57 @@ class MeTestaAnswerService:
         error_classification: ErrorClassification,
     ) -> ReviewCard:
         """Build Anki review card for spaced repetition."""
+        alternatives_text = self._format_alternatives(snapshot.alternatives)
+        alternatives_review = self._build_alternatives_review(snapshot, correct_answer)
+        explanation = snapshot.explanation or "Ainda não tenho uma explicação confiável para essa questão específica."
+        classification = error_classification.error_type.value if error_classification.error_type else "desconhecida"
+
         front = f"""📝 {snapshot.subject} - {snapshot.topic}
 
 {snapshot.content}
 
-Você respondeu: {student_answer}
-Resposta correta: {correct_answer}
-
-Classificação: {error_classification.error_type.value if error_classification.error_type else 'desconhecida'}"""
+{alternatives_text}"""
 
         back = f"""✅ Resposta correta: {correct_answer}
 
 📚 Explicação:
-{snapshot.explanation}
+{explanation}
+
+🔎 Alternativas:
+{alternatives_review}
 
 🎯 Foco de estudo:
-{error_classification.suggested_focus or 'Revisar este tópico'}"""
+{error_classification.suggested_focus or 'Revisar este tópico'}
+
+🧭 Sua resposta:
+Você marcou {student_answer}. Classificação do erro: {classification}."""
 
         return ReviewCard(
             review_card_id=str(uuid4()),
             front=front,
             back=back,
         )
+
+    def _format_alternatives(self, alternatives) -> str:
+        if not alternatives:
+            return ""
+        return "\n".join(f"{alternative.label}) {alternative.text}" for alternative in alternatives)
+
+    def _build_alternatives_review(self, snapshot, correct_answer: str) -> str:
+        if not snapshot.alternatives:
+            return f"{correct_answer}) Correta. {snapshot.explanation}".strip()
+
+        lines: list[str] = []
+        for alternative in snapshot.alternatives:
+            if alternative.label == correct_answer:
+                explanation = alternative.explanation or snapshot.explanation or "Esta é a alternativa que corresponde ao gabarito."
+                lines.append(f"{alternative.label}) {alternative.text} — correta. {explanation}")
+                continue
+            explanation = alternative.explanation or (
+                "Justificativa específica ainda não cadastrada; revisar comparando com a explicação da alternativa correta."
+            )
+            lines.append(f"{alternative.label}) {alternative.text} — incorreta. {explanation}")
+        return "\n".join(lines)
 
     def _build_feedback_message(
         self,
@@ -229,7 +404,7 @@ Classificação: {error_classification.error_type.value if error_classification.
 
         return "\n".join(
             [
-                "❌ Infelizmente, essa não é a resposta correta.",
+                "❌ Ainda não foi dessa vez, mas vamos usar isso a seu favor.",
                 "",
                 f"**Tipo de erro: {error_label}**",
                 f"_{error_reasoning}_",
@@ -237,8 +412,17 @@ Classificação: {error_classification.error_type.value if error_classification.
                 f"**Resposta correta: {correct_answer}**",
                 "",
                 f"**Explicação:**",
-                explanation,
+                explanation or "Ainda não tenho uma explicação confiável para essa questão específica, mas agora já registrei o gabarito correto.",
                 "",
-                "Vamos revisar esse tópico mais tarde para fixar melhor? 💪",
+                "Se quiser, eu posso te ajudar a destrinchar isso com calma agora mesmo. 💪",
             ]
         )
+
+    def _parse_alternative(self, raw_text: str) -> str | None:
+        normalized = raw_text.strip().upper()
+        if normalized in {"A", "B", "C", "D", "E"}:
+            return normalized
+        match = re.search(r"\b([A-E])\b", normalized)
+        if match is None:
+            return None
+        return match.group(1)

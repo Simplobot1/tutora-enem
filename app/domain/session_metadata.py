@@ -42,6 +42,8 @@ class SessionMetadata:
     anki: AnkiMetadata = field(default_factory=AnkiMetadata)
     last_user_message: dict[str, Any] = field(default_factory=dict)
     llm_trace: dict[str, Any] = field(default_factory=dict)
+    pending_student_answer: str | None = None
+    retry_attempts: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,7 +59,7 @@ class SessionMetadata:
                 "subject": self.question_snapshot.subject,
                 "topic": self.question_snapshot.topic,
                 "alternatives": [
-                    {"label": alt.label, "text": alt.text}
+                    {"label": alt.label, "text": alt.text, "explanation": alt.explanation}
                     for alt in self.question_snapshot.alternatives
                 ],
             },
@@ -80,4 +82,6 @@ class SessionMetadata:
             },
             "last_user_message": self.last_user_message,
             "llm_trace": self.llm_trace,
+            "pending_student_answer": self.pending_student_answer,
+            "retry_attempts": self.retry_attempts,
         }

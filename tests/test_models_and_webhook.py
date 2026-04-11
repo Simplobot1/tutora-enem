@@ -83,6 +83,7 @@ class TelegramWebhookApiTest(unittest.TestCase):
             session_service=object(),
             entry_service=object(),
             me_testa_service=me_testa_service,
+            telegram_gateway=object(),
         )
         set_runtime_services_override(lambda: runtime)
         try:

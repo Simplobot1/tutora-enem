@@ -15,7 +15,7 @@ class SessionMetadataTest(unittest.TestCase):
                 source_mode="student_submitted",
                 source_truth="student_content_only",
                 content="Enunciado",
-                alternatives=[QuestionAlternative(label="A", text="Opção A")],
+                alternatives=[QuestionAlternative(label="A", text="Opção A", explanation="Por que A está errada")],
                 correct_alternative="B",
                 explanation="Explicação curta",
             ),
@@ -31,6 +31,7 @@ class SessionMetadataTest(unittest.TestCase):
         self.assertEqual(data["flow"], "me_testa")
         self.assertEqual(data["state"], "WAITING_ANSWER")
         self.assertEqual(data["question_snapshot"]["alternatives"][0]["label"], "A")
+        self.assertEqual(data["question_snapshot"]["alternatives"][0]["explanation"], "Por que A está errada")
         self.assertEqual(data["question_snapshot"]["correct_alternative"], "B")
         self.assertEqual(data["question_snapshot"]["explanation"], "Explicação curta")
         self.assertEqual(data["review_card"]["review_card_id"], "rev-1")

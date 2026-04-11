@@ -35,3 +35,31 @@ class QuestionSnapshotServiceTest(unittest.TestCase):
         self.assertIsNotNone(snapshot)
         assert snapshot is not None
         self.assertEqual([alt.label for alt in snapshot.alternatives], ["A", "B", "C", "D", "E"])
+
+    def test_build_from_text_accepts_trailing_alternative_labels(self) -> None:
+        snapshot = self.service.build_from_text(
+            "Uma função f(x) = 2x² - 8x + 6. Quais são os valores de x para os quais f(x) = 0?\n\n"
+            "x = 1 e x = 3\n"
+            "A\n\n"
+            "x = 2 e x = 4\n"
+            "B\n\n"
+            "x = -1 e x = -3\",\n"
+            "C\n\n"
+            "x = 0 e x = 4\n"
+            "D\n\n"
+            "x = 2 e x = 6\n"
+            "E"
+        )
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.content, "Uma função f(x) = 2x² - 8x + 6. Quais são os valores de x para os quais f(x) = 0?")
+        self.assertEqual(
+            [(alt.label, alt.text) for alt in snapshot.alternatives],
+            [
+                ("A", "x = 1 e x = 3"),
+                ("B", "x = 2 e x = 4"),
+                ("C", "x = -1 e x = -3"),
+                ("D", "x = 0 e x = 4"),
+                ("E", "x = 2 e x = 6"),
+            ],
+        )

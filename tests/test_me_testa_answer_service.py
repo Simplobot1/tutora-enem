@@ -33,8 +33,8 @@ class MeTestaAnswerServiceTest(unittest.TestCase):
             content="Qual é a capital do Brasil?",
             alternatives=[
                 QuestionAlternative(label="A", text="São Paulo"),
-                QuestionAlternative(label="B", text="Rio de Janeiro"),
-                QuestionAlternative(label="C", text="Brasília"),
+                QuestionAlternative(label="B", text="Rio de Janeiro", explanation="Rio de Janeiro foi capital no passado, mas não é a capital atual."),
+                QuestionAlternative(label="C", text="Brasília", explanation="Brasília é a capital federal atual do Brasil."),
                 QuestionAlternative(label="D", text="Salvador"),
                 QuestionAlternative(label="E", text="Belo Horizonte"),
             ],
@@ -74,8 +74,10 @@ class MeTestaAnswerServiceTest(unittest.TestCase):
             )
         )
 
-        self.assertEqual(result.state, SessionState.DONE)
-        self.assertIn("Parabéns", result.reply_text)
+        self.assertEqual(result.state, SessionState.WAITING_FOLLOWUP_CHAT)
+        self.assertIn("questão comentada", result.reply_text.lower())
+        self.assertIn("C) Brasília — correta", result.reply_text)
+        self.assertIn("A) São Paulo — incorreta", result.reply_text)
         self.assertTrue(result.metadata.get("is_correct"))
 
     def test_process_incorrect_answer_sets_anki_status(self) -> None:
@@ -122,7 +124,14 @@ class MeTestaAnswerServiceTest(unittest.TestCase):
         self.assertGreater(len(review_card.front), 0)
         self.assertGreater(len(review_card.back), 0)
         self.assertIn("Geografia", review_card.front)
+        self.assertIn("A) São Paulo", review_card.front)
+        self.assertIn("C) Brasília", review_card.front)
         self.assertIn("Brasília", review_card.back)
+        self.assertIn("🔎 Alternativas", review_card.back)
+        self.assertIn("C) Brasília — correta. Brasília é a capital federal atual do Brasil.", review_card.back)
+        self.assertIn("A) São Paulo — incorreta", review_card.back)
+        self.assertIn("B) Rio de Janeiro — incorreta. Rio de Janeiro foi capital no passado", review_card.back)
+        self.assertIn("Você marcou B", review_card.back)
 
     def test_process_incorrect_answer_includes_error_type(self) -> None:
         """Test M2-S3: Error type is included in result metadata."""
@@ -154,6 +163,63 @@ class MeTestaAnswerServiceTest(unittest.TestCase):
         # Should stay in WAITING_ANSWER state
         self.assertEqual(result.state, SessionState.WAITING_ANSWER)
         self.assertIn("A, B, C, D ou E", result.reply_text)
+
+    def test_unknown_gabarito_requests_confirmation_instead_of_guessing(self) -> None:
+        snapshot = self._create_session_with_question().question_snapshot
+        assert snapshot is not None
+        snapshot.correct_alternative = None
+        session = SessionRecord(
+            session_id=None,
+            telegram_id=3001,
+            chat_id=4001,
+            flow=SessionFlow.ME_TESTA,
+            state=SessionState.WAITING_ANSWER,
+            question_snapshot=snapshot,
+            metadata=SessionMetadata(
+                flow=SessionFlow.ME_TESTA,
+                state=SessionState.WAITING_ANSWER,
+                source_mode="student_submitted",
+                question_snapshot=snapshot,
+            ),
+        )
+        self.repository.save(session)
+
+        result = self._run_async(
+            self.service.process_answer(
+                telegram_id=3001,
+                student_answer="A",
+                session=session,
+            )
+        )
+
+        self.assertEqual(result.state, SessionState.WAITING_GABARITO)
+        self.assertIn("gabarito", result.reply_text.lower())
+
+    def test_process_gabarito_uses_pending_answer(self) -> None:
+        snapshot = self._create_session_with_question().question_snapshot
+        assert snapshot is not None
+        snapshot.correct_alternative = None
+        session = SessionRecord(
+            session_id=None,
+            telegram_id=3002,
+            chat_id=4002,
+            flow=SessionFlow.ME_TESTA,
+            state=SessionState.WAITING_GABARITO,
+            question_snapshot=snapshot,
+            metadata=SessionMetadata(
+                flow=SessionFlow.ME_TESTA,
+                state=SessionState.WAITING_GABARITO,
+                source_mode="student_submitted",
+                question_snapshot=snapshot,
+                pending_student_answer="A",
+            ),
+        )
+        self.repository.save(session)
+
+        result = self._run_async(self.service.process_gabarito(session=session, gabarito_input="gabarito: C"))
+
+        self.assertEqual(result.state, SessionState.EXPLAINING_DIRECT)
+        self.assertIn("Resposta correta: C", result.reply_text)
 
     def test_feedback_message_format(self) -> None:
         """Test M2-S3: Feedback message is well-formatted."""
