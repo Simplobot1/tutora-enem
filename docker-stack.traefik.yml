@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  api:
+    image: tutora-api:latest
+    env_file:
+      - .env
+    volumes:
+      - /opt/tutora-enem/materiais:/app/materiais
+    networks:
+      - traefik_public
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=traefik_public
+        - traefik.http.routers.tutora.rule=Host(`tutora-sofia.simplobot.com.br`)
+        - traefik.http.routers.tutora.entrypoints=websecure
+        - traefik.http.routers.tutora.tls.certresolver=le
+        - traefik.http.services.tutora.loadbalancer.server.port=8000
+
+networks:
+  traefik_public:
+    external: true
