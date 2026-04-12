@@ -76,8 +76,8 @@ class MeTestaAnswerServiceTest(unittest.TestCase):
 
         self.assertEqual(result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertIn("questão comentada", result.reply_text.lower())
-        self.assertIn("C) Brasília — correta", result.reply_text)
-        self.assertIn("A) São Paulo — incorreta", result.reply_text)
+        self.assertIn("C) Brasília** — ✅ correta", result.reply_text)
+        self.assertIn("A) São Paulo** — ❌ incorreta", result.reply_text)
         self.assertTrue(result.metadata.get("is_correct"))
 
     def test_process_incorrect_answer_sets_anki_status(self) -> None:
@@ -128,9 +128,9 @@ class MeTestaAnswerServiceTest(unittest.TestCase):
         self.assertIn("C) Brasília", review_card.front)
         self.assertIn("Brasília", review_card.back)
         self.assertIn("🔎 Alternativas", review_card.back)
-        self.assertIn("C) Brasília — correta. Brasília é a capital federal atual do Brasil.", review_card.back)
-        self.assertIn("A) São Paulo — incorreta", review_card.back)
-        self.assertIn("B) Rio de Janeiro — incorreta. Rio de Janeiro foi capital no passado", review_card.back)
+        self.assertIn("C) Brasília** — ✅ correta", review_card.back)
+        self.assertIn("A) São Paulo** — ❌ incorreta", review_card.back)
+        self.assertIn("B) Rio de Janeiro** — ❌ incorreta", review_card.back)
         self.assertIn("Você marcou B", review_card.back)
 
     def test_process_incorrect_answer_includes_error_type(self) -> None:

@@ -123,8 +123,8 @@ class StudentSubmittedRetryFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertTrue(answer_result.metadata["is_correct"])
         self.assertIn("questão comentada", answer_result.reply_text.lower())
-        self.assertIn("A) Teníase. — correta", answer_result.reply_text)
-        self.assertIn("B) Filariose. — incorreta", answer_result.reply_text)
+        self.assertIn("A) Teníase.** — ✅ correta", answer_result.reply_text)
+        self.assertIn("B) Filariose.** — ❌ incorreta", answer_result.reply_text)
         self.assertTrue(self.submitted_questions_repository.rows[snapshot_id]["answered_correct"])
         self.assertFalse(self.submitted_questions_repository.rows[snapshot_id]["sent_to_anki"])
         alternatives = self.submitted_questions_repository.rows[snapshot_id]["alternatives"]
