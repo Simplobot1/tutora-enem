@@ -16,11 +16,17 @@ fi
 
 echo "Iniciando rollback para: $TARGET"
 git checkout "$TARGET"
-docker compose up -d --build --remove-orphans
+docker build -t tutora-api:latest .
+if [ -f docker-stack.traefik.yml ]; then
+    docker stack deploy -c docker-stack.traefik.yml tutora
+else
+    docker compose up -d --build --remove-orphans
+fi
 
 echo "Aguardando API..."
 for i in $(seq 1 10); do
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health || echo "000")
+    HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
     if [ "$STATUS" = "200" ]; then
         echo "Rollback concluído com sucesso. HEAD: $(git rev-parse HEAD)"
         exit 0
