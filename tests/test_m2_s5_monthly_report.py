@@ -12,6 +12,8 @@ import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+
 from app.services.monthly_report_service import (
     MonthlyReport,
     MonthlyReportService,
@@ -211,8 +213,6 @@ class TestReportFormatting(unittest.TestCase):
 
 class TestTelegramWebhookRelatorio(unittest.IsolatedAsyncioTestCase):
     async def test_relatorio_command_triggers_report(self) -> None:
-        from fastapi.testclient import TestClient
-        import asyncio
         from app.main import app
 
         payload = {
@@ -252,11 +252,15 @@ class TestTelegramWebhookRelatorio(unittest.IsolatedAsyncioTestCase):
             rt.telegram_gateway = mock_gateway
             mock_rt.return_value = rt
 
-            client = TestClient(app)
-            response = client.post(
-                "/webhooks/telegram",
-                json=payload,
-            )
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://testserver",
+            ) as client:
+                response = await client.post(
+                    "/webhooks/telegram",
+                    json=payload,
+                )
 
         self.assertEqual(response.status_code, 202)
         data = response.json()
