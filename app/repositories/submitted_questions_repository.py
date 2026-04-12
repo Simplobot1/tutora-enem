@@ -17,7 +17,14 @@ def serialize_alternatives(snapshot: QuestionSnapshot) -> list[dict[str, str]]:
 
 
 class SubmittedQuestionsRepository(Protocol):
-    def create_from_snapshot(self, session: SessionRecord, snapshot: QuestionSnapshot) -> str | None:
+    def create_from_snapshot(
+        self,
+        session: SessionRecord,
+        snapshot: QuestionSnapshot,
+        source: str = "text",
+        ocr_raw_text: str | None = None,
+        ocr_confidence: float | None = None,
+    ) -> str | None:
         ...
 
     def sync_snapshot(self, snapshot_id: str, snapshot: QuestionSnapshot) -> None:
@@ -41,7 +48,14 @@ class InMemorySubmittedQuestionsRepository:
     def __init__(self) -> None:
         self.rows: dict[str, dict[str, Any]] = {}
 
-    def create_from_snapshot(self, session: SessionRecord, snapshot: QuestionSnapshot) -> str | None:
+    def create_from_snapshot(
+        self,
+        session: SessionRecord,
+        snapshot: QuestionSnapshot,
+        source: str = "text",
+        ocr_raw_text: str | None = None,
+        ocr_confidence: float | None = None,
+    ) -> str | None:
         snapshot_id = str(uuid4())
         self.rows[snapshot_id] = {
             "id": snapshot_id,
@@ -54,6 +68,9 @@ class InMemorySubmittedQuestionsRepository:
             "subject": snapshot.subject,
             "topic": snapshot.topic,
             "source_truth": snapshot.source_truth,
+            "source": source,
+            "ocr_raw_text": ocr_raw_text,
+            "ocr_confidence": ocr_confidence,
             "answered_correct": None,
             "final_error_type": None,
             "retry_attempts": 0,
@@ -110,10 +127,17 @@ class SupabaseSubmittedQuestionsRepository:
         self.client = client
         self._disabled = False
 
-    def create_from_snapshot(self, session: SessionRecord, snapshot: QuestionSnapshot) -> str | None:
+    def create_from_snapshot(
+        self,
+        session: SessionRecord,
+        snapshot: QuestionSnapshot,
+        source: str = "text",
+        ocr_raw_text: str | None = None,
+        ocr_confidence: float | None = None,
+    ) -> str | None:
         if self.client is None or self._disabled:
             return None
-        payload = self._snapshot_payload(session, snapshot)
+        payload = self._snapshot_payload(session, snapshot, source, ocr_raw_text, ocr_confidence)
         try:
             response = self.client.table("submitted_questions").insert(payload).execute()
         except Exception as exc:
@@ -167,7 +191,14 @@ class SupabaseSubmittedQuestionsRepository:
         except Exception as exc:
             self._handle_storage_error("mark_result", exc)
 
-    def _snapshot_payload(self, session: SessionRecord, snapshot: QuestionSnapshot) -> dict[str, Any]:
+    def _snapshot_payload(
+        self,
+        session: SessionRecord,
+        snapshot: QuestionSnapshot,
+        source: str = "text",
+        ocr_raw_text: str | None = None,
+        ocr_confidence: float | None = None,
+    ) -> dict[str, Any]:
         return {
             "session_id": session.session_id,
             "telegram_id": session.telegram_id,
@@ -178,6 +209,9 @@ class SupabaseSubmittedQuestionsRepository:
             "subject": snapshot.subject,
             "topic": snapshot.topic,
             "source_truth": snapshot.source_truth,
+            "source": source,
+            "ocr_raw_text": ocr_raw_text,
+            "ocr_confidence": ocr_confidence,
         }
 
     def _handle_storage_error(self, operation: str, exc: Exception) -> None:
