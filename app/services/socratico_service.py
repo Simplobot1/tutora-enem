@@ -236,7 +236,9 @@ class SocraticoService:
             raise TypeError("session.metadata must be SessionMetadata")
 
         correct_answer = session.question_snapshot.correct_alternative or ""
-        if student_answer == correct_answer:
+        # Normalize answer to uppercase (defensive: may receive lowercase from parse)
+        student_answer_normalized = student_answer.strip().upper()
+        if student_answer_normalized == correct_answer:
             session.state = SessionState.WAITING_FOLLOWUP_CHAT
             session.metadata.state = SessionState.WAITING_FOLLOWUP_CHAT
             session.metadata.retry_attempts = 0
