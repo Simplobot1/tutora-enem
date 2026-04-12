@@ -5,13 +5,13 @@ M2-S3: Handle answer submission, error classification, and review card preparati
 
 from __future__ import annotations
 
-import re
 from uuid import uuid4
 
 from app.domain.error_classification import ErrorClassification, ErrorType
 from app.domain.models import ServiceResult, SessionRecord
 from app.domain.session_metadata import AnkiMetadata, ReviewCard, SessionMetadata
 from app.domain.states import SessionState
+from app.clients.llm import LLMClient
 from app.repositories.submitted_questions_repository import SubmittedQuestionsRepository
 from app.repositories.study_sessions_repository import StudySessionsRepository
 from app.services.alternative_explanation_service import AlternativeExplanationService
@@ -33,10 +33,12 @@ class MeTestaAnswerService:
         repository: StudySessionsRepository,
         socratico_service: SocraticoService | None = None,
         submitted_questions_repository: SubmittedQuestionsRepository | None = None,
+        llm_client: LLMClient | None = None,
     ) -> None:
         self.repository = repository
         self.socratico_service = socratico_service
         self.submitted_questions_repository = submitted_questions_repository
+        self.llm_client = llm_client
         self.alternative_explanation_service = AlternativeExplanationService()
 
     async def process_answer(
@@ -74,28 +76,14 @@ class MeTestaAnswerService:
                 should_reply=True,
             )
 
-        if not correct_answer:
-            if not isinstance(session.metadata, SessionMetadata):
-                raise TypeError("session.metadata must be SessionMetadata")
-            session.state = SessionState.WAITING_GABARITO
-            session.metadata.state = SessionState.WAITING_GABARITO
-            session.metadata.pending_student_answer = student_answer_upper
-            self.repository.save(session)
-            return ServiceResult(
-                state=SessionState.WAITING_GABARITO,
-                reply_text=(
-                    "Ainda não confirmei o gabarito dessa questão, então prefiro não te corrigir no escuro.\n\n"
-                    "Me manda o gabarito no formato `gabarito: A` que eu continuo com segurança."
-                ),
-                should_reply=True,
-                metadata={
-                    "needs_gabarito": True,
-                    "session_id": session.session_id,
-                },
-            )
+        # If no gabarito, resolve using Claude
+        if not correct_answer and self.llm_client is not None:
+            correct_answer = await self._resolve_correct_answer(snapshot)
+            if correct_answer:
+                snapshot.correct_alternative = correct_answer
 
         # Check if answer is correct
-        is_correct = student_answer_upper == correct_answer
+        is_correct = student_answer_upper == correct_answer if correct_answer else False
 
         if is_correct:
             return await self._handle_correct_answer(session)
@@ -104,55 +92,38 @@ class MeTestaAnswerService:
                 session, student_answer_upper, correct_answer
             )
 
-    async def process_gabarito(
-        self,
-        session: SessionRecord,
-        gabarito_input: str,
-    ) -> ServiceResult:
-        if session.question_snapshot is None:
-            return ServiceResult(
-                state=SessionState.FAILED_RETRYABLE,
-                reply_text="Eu me perdi da questão anterior aqui. Me manda de novo que eu retomo com você.",
-                should_reply=True,
-            )
-        if not isinstance(session.metadata, SessionMetadata):
-            raise TypeError("session.metadata must be SessionMetadata")
+    async def _resolve_correct_answer(self, snapshot) -> str | None:
+        """Use Claude to resolve correct answer when not in database."""
+        if self.llm_client is None:
+            return None
 
-        parsed = self._parse_alternative(gabarito_input)
-        if parsed is None:
-            return ServiceResult(
-                state=SessionState.WAITING_GABARITO,
-                reply_text="Não consegui identificar o gabarito ainda. Me manda no formato `gabarito: A`.",
-                should_reply=True,
+        try:
+            alternatives_text = "\n".join(
+                f"{alt.label}) {alt.text}" for alt in snapshot.alternatives
+            )
+            prompt = (
+                f"Você é um especialista em questões do ENEM. "
+                f"Analise esta questão e determine qual é a alternativa correta.\n\n"
+                f"Enunciado:\n{snapshot.content}\n\n"
+                f"Alternativas:\n{alternatives_text}\n\n"
+                f"Responda APENAS com a letra da alternativa correta (A, B, C, D ou E)."
             )
 
-        session.question_snapshot.correct_alternative = parsed
-        pending_student_answer = session.metadata.pending_student_answer
-        session.metadata.pending_student_answer = None
-        snapshot_id = session.metadata.question_ref.snapshot_id
-        if self.submitted_questions_repository is not None and snapshot_id:
-            self.submitted_questions_repository.sync_snapshot(snapshot_id, session.question_snapshot)
-        self.repository.save(session)
-
-        if pending_student_answer:
-            return await self.process_answer(
-                telegram_id=session.telegram_id,
-                student_answer=pending_student_answer,
-                session=session,
+            response = await self.llm_client.create_message(
+                model="claude-sonnet-4-6",
+                max_tokens=100,
+                messages=[{"role": "user", "content": prompt}],
             )
 
-        session.state = SessionState.WAITING_ANSWER
-        session.metadata.state = SessionState.WAITING_ANSWER
-        self.repository.save(session)
-        return ServiceResult(
-            state=SessionState.WAITING_ANSWER,
-            reply_text="Perfeito, agora eu tenho o gabarito. Me conta qual alternativa você marcou.",
-            should_reply=True,
-            metadata={
-                "session_id": session.session_id,
-                "correct_alternative": parsed,
-            },
-        )
+            if response.content and len(response.content) > 0:
+                answer = response.content[0].text.strip().upper()
+                if answer in "ABCDE":
+                    return answer
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to resolve correct answer with Claude: {e}")
+
+        return None
 
     async def _handle_correct_answer(self, session: SessionRecord) -> ServiceResult:
         """Handle case where student answered correctly."""
@@ -425,11 +396,3 @@ Você marcou {student_answer}. Classificação do erro: {classification}."""
             ]
         )
 
-    def _parse_alternative(self, raw_text: str) -> str | None:
-        normalized = raw_text.strip().upper()
-        if normalized in {"A", "B", "C", "D", "E"}:
-            return normalized
-        match = re.search(r"\b([A-E])\b", normalized)
-        if match is None:
-            return None
-        return match.group(1)

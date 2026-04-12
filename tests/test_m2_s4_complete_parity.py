@@ -208,41 +208,6 @@ class CompleteParityStudentSubmittedTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(intake_result.metadata["question_id"])
         self.assertIn("Agora me conta qual alternativa você marcou", intake_result.reply_text)
 
-    async def test_student_submitted_without_bank_match_requests_gabarito(self) -> None:
-        """Test: student_submitted mode without bank match must request gabarito instead of guessing."""
-        # Step 1: intake complete question
-        intake_event = self.intake.normalize_update(
-            {
-                "update_id": 7,
-                "message": {
-                    "message_id": 106,
-                    "text": COMPLETE_QUESTION,
-                    "chat": {"id": 324},
-                    "from": {"id": 126},
-                },
-            }
-        )
-
-        intake_result = await self.service.handle_event(intake_event)
-        self.assertEqual(intake_result.state, SessionState.WAITING_ANSWER)
-
-        # Step 2: submit answer without known gabarito
-        answer_event = self.intake.normalize_update(
-            {
-                "update_id": 8,
-                "message": {
-                    "message_id": 107,
-                    "text": "B",
-                    "chat": {"id": 324},
-                    "from": {"id": 126},
-                },
-            }
-        )
-
-        answer_result = await self.service.handle_event(answer_event)
-        self.assertEqual(answer_result.state, SessionState.WAITING_GABARITO)
-        self.assertTrue(answer_result.metadata["needs_gabarito"])
-
 
 class FallbackDetailsFlowTest(unittest.IsolatedAsyncioTestCase):
     """Test fallback flow: incomplete → request details → receive complete."""

@@ -164,63 +164,6 @@ class MeTestaAnswerServiceTest(unittest.TestCase):
         self.assertEqual(result.state, SessionState.WAITING_ANSWER)
         self.assertIn("A, B, C, D ou E", result.reply_text)
 
-    def test_unknown_gabarito_requests_confirmation_instead_of_guessing(self) -> None:
-        snapshot = self._create_session_with_question().question_snapshot
-        assert snapshot is not None
-        snapshot.correct_alternative = None
-        session = SessionRecord(
-            session_id=None,
-            telegram_id=3001,
-            chat_id=4001,
-            flow=SessionFlow.ME_TESTA,
-            state=SessionState.WAITING_ANSWER,
-            question_snapshot=snapshot,
-            metadata=SessionMetadata(
-                flow=SessionFlow.ME_TESTA,
-                state=SessionState.WAITING_ANSWER,
-                source_mode="student_submitted",
-                question_snapshot=snapshot,
-            ),
-        )
-        self.repository.save(session)
-
-        result = self._run_async(
-            self.service.process_answer(
-                telegram_id=3001,
-                student_answer="A",
-                session=session,
-            )
-        )
-
-        self.assertEqual(result.state, SessionState.WAITING_GABARITO)
-        self.assertIn("gabarito", result.reply_text.lower())
-
-    def test_process_gabarito_uses_pending_answer(self) -> None:
-        snapshot = self._create_session_with_question().question_snapshot
-        assert snapshot is not None
-        snapshot.correct_alternative = None
-        session = SessionRecord(
-            session_id=None,
-            telegram_id=3002,
-            chat_id=4002,
-            flow=SessionFlow.ME_TESTA,
-            state=SessionState.WAITING_GABARITO,
-            question_snapshot=snapshot,
-            metadata=SessionMetadata(
-                flow=SessionFlow.ME_TESTA,
-                state=SessionState.WAITING_GABARITO,
-                source_mode="student_submitted",
-                question_snapshot=snapshot,
-                pending_student_answer="A",
-            ),
-        )
-        self.repository.save(session)
-
-        result = self._run_async(self.service.process_gabarito(session=session, gabarito_input="gabarito: C"))
-
-        self.assertEqual(result.state, SessionState.EXPLAINING_DIRECT)
-        self.assertIn("Resposta correta: C", result.reply_text)
-
     def test_feedback_message_format(self) -> None:
         """Test M2-S3: Feedback message is well-formatted."""
         session = self._create_session_with_question()
