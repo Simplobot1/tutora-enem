@@ -170,6 +170,37 @@ class MeTestaEntryService:
                 )
                 session.metadata.question_ref.snapshot_id = snapshot_id
 
+        # OCR without bank match must get gabarito FIRST (has no correct_alternative)
+        if ocr_result is not None and match is None:
+            session.state = SessionState.WAITING_GABARITO
+            session.metadata.question_ref = QuestionRef()
+            text_for_log = event.text or event.caption or "(image)"
+            session.metadata.last_user_message = {"text": text_for_log, "message_id": event.message_id}
+            self.session_service.save(session)
+
+            alternatives_text = "\n".join(f"{alt.label}) {alt.text}" for alt in snapshot.alternatives)
+            reply = "\n".join(
+                [
+                    "Boa, organizei a questão com a foto que você mandou.",
+                    "",
+                    snapshot.content,
+                    "",
+                    alternatives_text,
+                    "",
+                    "Qual é o gabarito dessa questão? (me manda no formato `gabarito: A`)",
+                ]
+            )
+            return ServiceResult(
+                state=session.state,
+                reply_text=reply,
+                metadata={
+                    "flow": session.flow.value,
+                    "session_id": session.session_id,
+                    "source_mode": session.source_mode,
+                    "question_id": session.question_id,
+                },
+            )
+
         session.state = session.state.__class__.WAITING_ANSWER
         text_for_log = event.text or event.caption or "(image)"
         session.metadata.last_user_message = {"text": text_for_log, "message_id": event.message_id, "chat_id": event.chat_id}

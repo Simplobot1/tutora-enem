@@ -175,7 +175,11 @@ class MeTestaAnswerService:
             sent_to_anki=False,
             apkg_generated=False,
         )
-        alternatives_review = self._build_alternatives_review(snapshot, snapshot.correct_alternative or "") if snapshot is not None else ""
+        alternatives_review = self._build_alternatives_review(
+            snapshot,
+            snapshot.correct_alternative or "",
+            student_answer=None  # Correct answer, no need to show student's answer
+        ) if snapshot is not None else ""
 
         return ServiceResult(
             state=SessionState.WAITING_FOLLOWUP_CHAT,
@@ -339,7 +343,7 @@ class MeTestaAnswerService:
     ) -> ReviewCard:
         """Build Anki review card for spaced repetition."""
         alternatives_text = self._format_alternatives(snapshot.alternatives)
-        alternatives_review = self._build_alternatives_review(snapshot, correct_answer)
+        alternatives_review = self._build_alternatives_review(snapshot, correct_answer, student_answer=student_answer)
         explanation = snapshot.explanation or "Ainda não tenho uma explicação confiável para essa questão específica."
         classification = error_classification.error_type.value if error_classification.error_type else "desconhecida"
 
@@ -374,20 +378,35 @@ Você marcou {student_answer}. Classificação do erro: {classification}."""
             return ""
         return "\n".join(f"{alternative.label}) {alternative.text}" for alternative in alternatives)
 
-    def _build_alternatives_review(self, snapshot, correct_answer: str) -> str:
+    def _build_alternatives_review(self, snapshot, correct_answer: str, student_answer: str | None = None) -> str:
+        """Build concise review of alternatives.
+
+        Shows only:
+        - Correct alternative (always)
+        - Student's alternative (if wrong and different from correct)
+        """
         if not snapshot.alternatives:
             return f"{correct_answer}) Correta. {snapshot.explanation}".strip()
 
+        # Find correct and student alternatives
+        correct_alt = next((alt for alt in snapshot.alternatives if alt.label == correct_answer), None)
+        student_alt = next((alt for alt in snapshot.alternatives if alt.label == student_answer), None) if student_answer else None
+
         lines: list[str] = []
-        for alternative in snapshot.alternatives:
-            if alternative.label == correct_answer:
-                explanation = alternative.explanation or snapshot.explanation or "Esta é a alternativa que corresponde ao gabarito."
-                lines.append(f"{alternative.label}) {alternative.text} — correta. {explanation}")
-                continue
-            explanation = alternative.explanation or (
-                "Justificativa específica ainda não cadastrada; revisar comparando com a explicação da alternativa correta."
-            )
-            lines.append(f"{alternative.label}) {alternative.text} — incorreta. {explanation}")
+
+        # Always show correct alternative
+        if correct_alt:
+            explanation = correct_alt.explanation or snapshot.explanation or "Esta é a alternativa correta."
+            lines.append(f"**{correct_alt.label}) {correct_alt.text}** — correta ✅\n{explanation}")
+        else:
+            lines.append(f"**{correct_answer}) (sem texto)** — correta ✅\n{snapshot.explanation or 'Resposta correta.'}")
+
+        # Show student's alternative only if wrong and different
+        if student_alt and student_answer != correct_answer:
+            lines.append("")
+            explanation = student_alt.explanation or "Revise esta alternativa e compare com a correta."
+            lines.append(f"**{student_alt.label}) {student_alt.text}** — sua resposta\n{explanation}")
+
         return "\n".join(lines)
 
     def _build_feedback_message(
