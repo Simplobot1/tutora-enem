@@ -52,7 +52,7 @@ jobs:
             # Rebuild e restart da stack Swarm atrás do Traefik existente
             mkdir -p materiais/flashcards
             chown -R 1000:1000 materiais
-            docker build --no-cache -t tutora-api:latest .
+            docker build -t tutora-api:latest .
             docker stack deploy -c docker-stack.traefik.yml tutora
 
             # Aguarda API subir (até 30s)
@@ -70,7 +70,7 @@ jobs:
             # Healthcheck falhou → rollback automático
             echo "Healthcheck falhou após 30s. Iniciando rollback para $PREV_COMMIT..."
             git checkout "$PREV_COMMIT"
-            docker build --no-cache -t tutora-api:latest .
+            docker build -t tutora-api:latest .
             docker stack deploy -c docker-stack.traefik.yml tutora
             echo "Rollback concluído. Verificando..."
             curl -sf https://${{ secrets.DEPLOY_FQDN }}/health && echo "Rollback bem-sucedido." || echo "ERRO: rollback também falhou!"
