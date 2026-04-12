@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia código da aplicação
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 
 # Usuário não-root para segurança
 RUN adduser --disabled-password --gecos "" appuser

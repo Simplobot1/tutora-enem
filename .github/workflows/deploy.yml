@@ -45,15 +45,20 @@ jobs:
             echo "Commit anterior: $PREV_COMMIT" > /tmp/tutora_prev_commit
 
             # Atualiza código
-            git pull origin main
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
 
-            # Rebuild e restart do container
-            docker compose up -d --build --remove-orphans
+            # Rebuild e restart da stack Swarm atrás do Traefik existente
+            mkdir -p materiais/flashcards
+            chown -R 1000:1000 materiais
+            docker build -t tutora-api:latest .
+            docker stack deploy -c docker-stack.traefik.yml tutora
 
             # Aguarda API subir (até 30s)
             echo "Aguardando healthcheck..."
             for i in $(seq 1 10); do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health || echo "000")
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.DEPLOY_FQDN }}/health || echo "000")
               if [ "$STATUS" = "200" ]; then
                 echo "Healthcheck OK (tentativa $i)"
                 exit 0
@@ -65,15 +70,16 @@ jobs:
             # Healthcheck falhou → rollback automático
             echo "Healthcheck falhou após 30s. Iniciando rollback para $PREV_COMMIT..."
             git checkout "$PREV_COMMIT"
-            docker compose up -d --build --remove-orphans
+            docker build -t tutora-api:latest .
+            docker stack deploy -c docker-stack.traefik.yml tutora
             echo "Rollback concluído. Verificando..."
-            curl -sf http://127.0.0.1:8000/health && echo "Rollback bem-sucedido." || echo "ERRO: rollback também falhou!"
+            curl -sf https://${{ secrets.DEPLOY_FQDN }}/health && echo "Rollback bem-sucedido." || echo "ERRO: rollback também falhou!"
             exit 1
 
       - name: Validação pós-deploy (externo)
         run: |
           echo "Validando endpoint público..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.DEPLOY_HOST }}/health || echo "000")
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.DEPLOY_FQDN }}/health || echo "000")
           if [ "$STATUS" = "200" ]; then
             echo "Deploy validado — /health respondeu 200"
           else
