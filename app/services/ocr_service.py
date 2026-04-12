@@ -26,6 +26,25 @@ class OcrService:
         self.llm_client = llm_client
         self.telegram_bot_token = telegram_bot_token
 
+    async def extract_question_as_text(self, file_id: str) -> str | None:
+        """
+        Extract question text from image using Claude Vision API.
+
+        Args:
+            file_id: Telegram file_id for the image
+
+        Returns:
+            Question text string (enunciado + alternativas formatted as "A) ...", "B) ...", etc.)
+            None if extraction fails
+        """
+        result = await self.extract_question(file_id)
+        if result is None:
+            return None
+
+        # Format as text: enunciado + alternatives
+        alternatives_text = "\n".join(f"{alt.label}) {alt.text}" for alt in result.alternatives)
+        return f"{result.content}\n{alternatives_text}"
+
     async def extract_question(self, file_id: str) -> OcrResult | None:
         """
         Extract question from image using Claude Vision API.

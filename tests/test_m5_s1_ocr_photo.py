@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.domain.models import Attachment, InboundEvent, QuestionAlternative
+from app.domain.models import Attachment, InboundEvent, QuestionAlternative, QuestionSnapshot
 from app.domain.session_metadata import SessionMetadata
 from app.domain.states import SessionFlow, SessionState
 from app.services.me_testa_entry_service import MeTestaEntryService
@@ -177,7 +177,6 @@ class TestMeTestaEntryServiceOcr:
             questions_repository=questions_repository,
             submitted_questions_repository=submitted_questions_repository,
             ocr_service=ocr_service,
-            ocr_cache=ocr_cache,
         )
 
         # Mock session
@@ -208,8 +207,25 @@ class TestMeTestaEntryServiceOcr:
             ocr_confidence=0.92,
         )
 
-        ocr_service.extract_question = AsyncMock(return_value=ocr_result)
+        # Mock extract_question_as_text to return formatted question text
+        question_text = "Questão teste\nA) Opção A\nB) Opção B\nC) Opção C\nD) Opção D\nE) Opção E"
+        ocr_service.extract_question_as_text = AsyncMock(return_value=question_text)
         questions_repository.find_best_match.return_value = None
+
+        # Mock question_snapshot_service to return a valid snapshot
+        snapshot = QuestionSnapshot(
+            source_mode="student_submitted",
+            source_truth="student_content_only",
+            content="Questão teste",
+            alternatives=[
+                QuestionAlternative(label="A", text="Opção A"),
+                QuestionAlternative(label="B", text="Opção B"),
+                QuestionAlternative(label="C", text="Opção C"),
+                QuestionAlternative(label="D", text="Opção D"),
+                QuestionAlternative(label="E", text="Opção E"),
+            ],
+        )
+        question_snapshot_service.build_from_text.return_value = snapshot
 
         # Create event with image
         event = InboundEvent(
@@ -226,18 +242,17 @@ class TestMeTestaEntryServiceOcr:
 
         assert result is not None
         assert "organizei a questão" in result.reply_text
-        assert ocr_service.extract_question.called
+        assert ocr_service.extract_question_as_text.called
 
     @pytest.mark.asyncio
     async def test_handle_image_intake_cache_hit(self):
-        """Scenario 3 (main): Same file_id sent 2× → cache hit, Claude not called again"""
+        """Scenario 3 (simplified): Image mode OCR extraction → returns formatted question"""
         session_service = MagicMock()
         question_snapshot_service = MagicMock()
         questions_repository = MagicMock()
         submitted_questions_repository = MagicMock()
 
         ocr_service = MagicMock(spec=OcrService)
-        ocr_cache = OcrCache()
 
         entry_service = MeTestaEntryService(
             session_service=session_service,
@@ -245,11 +260,16 @@ class TestMeTestaEntryServiceOcr:
             questions_repository=questions_repository,
             submitted_questions_repository=submitted_questions_repository,
             ocr_service=ocr_service,
-            ocr_cache=ocr_cache,
         )
 
-        # Pre-populate cache
-        cached_result = OcrResult(
+        # Mock extract_question_as_text to return formatted question text
+        question_text = "Cached question\nA) Opção A\nB) Opção B\nC) Opção C\nD) Opção D\nE) Opção E"
+        ocr_service.extract_question_as_text = AsyncMock(return_value=question_text)
+
+        # Mock snapshot
+        snapshot = QuestionSnapshot(
+            source_mode="student_submitted",
+            source_truth="student_content_only",
             content="Cached question",
             alternatives=[
                 QuestionAlternative(label="A", text="Opção A"),
@@ -258,10 +278,8 @@ class TestMeTestaEntryServiceOcr:
                 QuestionAlternative(label="D", text="Opção D"),
                 QuestionAlternative(label="E", text="Opção E"),
             ],
-            ocr_raw_text='{"cached": "true"}',
-            ocr_confidence=0.88,
         )
-        ocr_cache.set("file_cached", cached_result)
+        question_snapshot_service.build_from_text.return_value = snapshot
 
         # Mock session
         session = MagicMock()
@@ -278,7 +296,7 @@ class TestMeTestaEntryServiceOcr:
         session_service.get_or_create_active_session.return_value = session
         questions_repository.find_best_match.return_value = None
 
-        # Create event with same file_id
+        # Create event with image
         event = InboundEvent(
             update_id=2,
             telegram_id=654321,
@@ -291,10 +309,10 @@ class TestMeTestaEntryServiceOcr:
 
         result = await entry_service.handle_question_intake(event)
 
-        # Verify cache was hit (OCR service not called)
+        # Verify OCR was called and result returned
         assert result is not None
         assert "Cached question" in result.reply_text
-        assert not ocr_service.extract_question.called
+        assert ocr_service.extract_question_as_text.called
 
     @pytest.mark.asyncio
     async def test_handle_image_intake_failure(self):
@@ -308,7 +326,6 @@ class TestMeTestaEntryServiceOcr:
             session_service=session_service,
             question_snapshot_service=question_snapshot_service,
             ocr_service=ocr_service,
-            ocr_cache=ocr_cache,
         )
 
         # Mock session
@@ -322,8 +339,9 @@ class TestMeTestaEntryServiceOcr:
 
         session_service.get_or_create_active_session.return_value = session
 
-        # OCR fails (returns None)
-        ocr_service.extract_question = AsyncMock(return_value=None)
+        # OCR fails (returns None or empty string)
+        ocr_service.extract_question_as_text = AsyncMock(return_value=None)
+        question_snapshot_service.build_from_text.return_value = None
 
         event = InboundEvent(
             update_id=3,
@@ -337,12 +355,14 @@ class TestMeTestaEntryServiceOcr:
 
         result = await entry_service.handle_question_intake(event)
 
+        # When OCR fails, follows same flow as empty text input
         assert result is not None
-        assert "Não consegui ler a foto" in result.reply_text
+        assert "Ainda não consegui montar a questão inteira" in result.reply_text
+        assert result.state == SessionState.WAITING_FALLBACK_DETAILS
 
     @pytest.mark.asyncio
-    async def test_submitted_questions_persists_ocr_fields(self):
-        """Scenario 5: OCR snapshot persists with source='ocr_photo', ocr_raw_text, ocr_confidence"""
+    async def test_submitted_questions_persists_ocr_as_text(self):
+        """Scenario 5 (unified): OCR snapshot persists with source='text' (no OCR-specific fields)"""
         from app.repositories.submitted_questions_repository import InMemorySubmittedQuestionsRepository
         from app.domain.models import QuestionSnapshot, SessionRecord
 
@@ -357,10 +377,10 @@ class TestMeTestaEntryServiceOcr:
             state=MagicMock(value="WAITING_ANSWER"),
         )
 
-        # Create OCR snapshot
+        # Create snapshot from OCR (treated as text input in unified flow)
         snapshot = QuestionSnapshot(
-            source_mode="ocr_photo",
-            source_truth="ocr_vision",
+            source_mode="student_submitted",
+            source_truth="student_content_only",
             content="Test OCR question",
             alternatives=[
                 QuestionAlternative(label="A", text="Alt A"),
@@ -371,17 +391,16 @@ class TestMeTestaEntryServiceOcr:
             ],
         )
 
-        # Create from snapshot with OCR fields
+        # Unified flow: OCR uses source="text" (no OCR-specific fields)
         snapshot_id = repo.create_from_snapshot(
             session,
             snapshot,
-            source="ocr_photo",
-            ocr_raw_text='{"enunciado": "..."}',
-            ocr_confidence=0.91,
+            source="text",
         )
 
         assert snapshot_id is not None
         row = repo.rows[snapshot_id]
-        assert row["source"] == "ocr_photo"
-        assert row["ocr_raw_text"] == '{"enunciado": "..."}'
-        assert row["ocr_confidence"] == 0.91
+        assert row["source"] == "text"
+        # OCR-specific fields no longer used in unified flow
+        assert row.get("ocr_raw_text") is None
+        assert row.get("ocr_confidence") is None

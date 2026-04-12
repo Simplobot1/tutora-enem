@@ -7,7 +7,6 @@ from app.domain.models import InboundEvent, QuestionAlternative, QuestionSnapsho
 from app.domain.states import SessionFlow, SessionState
 from app.repositories.questions_repository import QuestionsRepository
 from app.repositories.submitted_questions_repository import SubmittedQuestionsRepository
-from app.services.ocr_cache import OcrCache
 from app.services.ocr_service import OcrService
 from app.services.question_curator_service import QuestionCuratorService
 from app.services.question_snapshot_service import QuestionSnapshotService
@@ -23,7 +22,6 @@ class MeTestaEntryService:
         question_curator_service: QuestionCuratorService | None = None,
         submitted_questions_repository: SubmittedQuestionsRepository | None = None,
         ocr_service: OcrService | None = None,
-        ocr_cache: OcrCache | None = None,
     ) -> None:
         self.session_service = session_service
         self.question_snapshot_service = question_snapshot_service
@@ -31,7 +29,6 @@ class MeTestaEntryService:
         self.question_curator_service = question_curator_service or QuestionCuratorService()
         self.submitted_questions_repository = submitted_questions_repository
         self.ocr_service = ocr_service
-        self.ocr_cache = ocr_cache or OcrCache()
 
     async def handle_question_intake(self, event: InboundEvent) -> ServiceResult:
         session = self.session_service.get_or_create_active_session(
@@ -42,11 +39,13 @@ class MeTestaEntryService:
         if not isinstance(session.metadata, SessionMetadata):
             raise TypeError("session.metadata must be SessionMetadata")
 
-        # Handle image mode: extract question via OCR
-        if event.input_mode == "image" and self.ocr_service is not None:
-            return await self._handle_image_intake(event, session)
+        # Extract text: either from message or from OCR
+        text = event.text or event.caption or ""
+        if not text.strip() and event.attachment.file_id and self.ocr_service is not None:
+            # OCR: extract text from image, returns text string (not OcrResult)
+            text = await self.ocr_service.extract_question_as_text(event.attachment.file_id) or ""
 
-        text = (event.text or event.caption).strip()
+        text = text.strip()
         snapshot = self.question_snapshot_service.build_from_text(text)
 
         if snapshot is None:
@@ -72,59 +71,11 @@ class MeTestaEntryService:
 
         return await self._process_snapshot(event, session, snapshot)
 
-    async def _handle_image_intake(self, event: InboundEvent, session: Any) -> ServiceResult:
-        """
-        Handle image input mode: extract question via OCR using Claude Vision.
-
-        Returns ServiceResult with error message if OCR fails, or continues to normal flow.
-        """
-        file_id = event.attachment.file_id
-        if not file_id:
-            return ServiceResult(
-                state=session.state,
-                reply_text="Não consegui processar a imagem. Tira outra ou manda o texto?",
-            )
-
-        # Check cache first
-        cached_result = self.ocr_cache.get(file_id)
-        if cached_result is not None:
-            snapshot = self._build_snapshot_from_ocr(cached_result)
-            return await self._process_snapshot(event, session, snapshot)
-
-        # Call OCR service
-        ocr_result = await self.ocr_service.extract_question(file_id)
-        if ocr_result is None:
-            # AC7: Friendly error message, no persistence
-            return ServiceResult(
-                state=session.state,
-                reply_text="Não consegui ler a foto. Tira outra ou manda o texto?",
-            )
-
-        # Cache the result
-        self.ocr_cache.set(file_id, ocr_result)
-
-        # Build snapshot from OCR result
-        snapshot = self._build_snapshot_from_ocr(ocr_result)
-
-        # Continue with normal flow, but store OCR metadata
-        return await self._process_snapshot(event, session, snapshot, ocr_result=ocr_result)
-
-    def _build_snapshot_from_ocr(self, ocr_result: Any) -> QuestionSnapshot:
-        """Build QuestionSnapshot from OCR result."""
-        return QuestionSnapshot(
-            source_mode="ocr_photo",
-            source_truth="ocr_vision",
-            content=ocr_result.content,
-            alternatives=ocr_result.alternatives,
-            correct_alternative=None,  # OCR doesn't know the correct answer
-        )
-
     async def _process_snapshot(
         self,
         event: InboundEvent,
         session: Any,
         snapshot: QuestionSnapshot,
-        ocr_result: Any | None = None,
     ) -> ServiceResult:
         """
         Process question snapshot (common logic for text and OCR).
@@ -164,14 +115,9 @@ class MeTestaEntryService:
                 snapshot_id = self.submitted_questions_repository.create_from_snapshot(
                     session,
                     snapshot,
-                    source="ocr_photo" if ocr_result else "text",
-                    ocr_raw_text=ocr_result.ocr_raw_text if ocr_result else None,
-                    ocr_confidence=ocr_result.ocr_confidence if ocr_result else None,
+                    source="text",
                 )
                 session.metadata.question_ref.snapshot_id = snapshot_id
-
-        # For OCR without bank match: ask what student marked FIRST (not gabarito)
-        # Gabarito will be asked later if needed during answer validation
 
         session.state = session.state.__class__.WAITING_ANSWER
         text_for_log = event.text or event.caption or "(image)"
