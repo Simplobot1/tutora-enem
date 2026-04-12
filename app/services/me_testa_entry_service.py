@@ -187,7 +187,8 @@ class MeTestaEntryService:
                     "",
                     alternatives_text,
                     "",
-                    "Qual é o gabarito dessa questão? (me manda no formato `gabarito: A`)",
+                    "Qual é o gabarito E qual alternativa você marcou?",
+                    "(me manda assim: `gabarito: C, resposta: A` ou separado em linhas)",
                 ]
             )
             return ServiceResult(
