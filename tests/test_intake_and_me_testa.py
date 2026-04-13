@@ -98,6 +98,27 @@ class IntakeAndMeTestaTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(markup["inline_keyboard"][1][0]["text"], "💭 Ansiosa")
         self.assertEqual(markup["inline_keyboard"][1][0]["callback_data"], "mood:ansiosa")
 
+    async def test_duplicate_telegram_update_does_not_send_duplicate_reply(self) -> None:
+        event = self.intake.normalize_update(
+            {
+                "update_id": 210,
+                "message": {
+                    "message_id": 110,
+                    "text": "oi",
+                    "chat": {"id": 321},
+                    "from": {"id": 123},
+                },
+            }
+        )
+
+        first_result = await self.service.handle_event(event)
+        duplicate_result = await self.service.handle_event(event)
+
+        self.assertEqual(first_result.state, SessionState.IDLE)
+        self.assertFalse(duplicate_result.should_reply)
+        self.assertTrue(duplicate_result.metadata["duplicate_event"])
+        self.assertEqual(len(self.gateway.messages), 1)
+
     async def test_mood_callback_updates_session_instead_of_falling_into_intake(self) -> None:
         greet_event = self.intake.normalize_update(
             {

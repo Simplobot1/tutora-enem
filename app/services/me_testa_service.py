@@ -6,7 +6,7 @@ import re
 
 from app.clients.llm import LLMClient
 from app.adapters.telegram_api import TelegramGateway
-from app.domain.session_metadata import AnkiMetadata, QuestionRef, ReviewCard
+from app.domain.session_metadata import AnkiMetadata, QuestionRef, ReviewCard, SessionMetadata
 from app.domain.models import InboundEvent, ServiceResult, SessionRecord
 from app.domain.states import SessionFlow
 from app.domain.states import SessionState
@@ -67,7 +67,33 @@ class MeTestaService:
                     apkg_path,
                     caption="Aqui está seu deck de revisão em `.apkg` para importar no Anki.",
                 )
+        self._mark_event_processed(event)
         return result
+
+    def _event_fingerprint(self, event: InboundEvent) -> str:
+        if event.update_id is not None:
+            return f"update:{event.update_id}"
+        if event.message_id is not None:
+            return f"message:{event.message_id}"
+        return ""
+
+    def _is_duplicate_event(self, session: SessionRecord, event: InboundEvent) -> bool:
+        if not isinstance(session.metadata, SessionMetadata):
+            return False
+        fingerprint = self._event_fingerprint(event)
+        return bool(fingerprint and session.metadata.llm_trace.get("last_processed_event") == fingerprint)
+
+    def _mark_event_processed(self, event: InboundEvent) -> None:
+        fingerprint = self._event_fingerprint(event)
+        if not fingerprint:
+            return
+        session = self.session_service.repository.get_active_session(event.telegram_id, SessionFlow.ME_TESTA)
+        if session is None or not isinstance(session.metadata, SessionMetadata):
+            return
+        session.metadata.llm_trace["last_processed_event"] = fingerprint
+        session.metadata.llm_trace["last_processed_message_id"] = event.message_id
+        session.metadata.llm_trace["last_processed_update_id"] = event.update_id
+        self.session_service.save(session)
 
     def _is_greeting(self, event: InboundEvent) -> bool:
         normalized = (event.text or event.caption).strip().lower()
@@ -274,6 +300,22 @@ class MeTestaService:
             chat_id=event.chat_id,
             flow=SessionFlow.ME_TESTA,
         )
+
+        if self._is_duplicate_event(session, event):
+            logger.info(
+                "me_testa_service: ignoring duplicate event for telegram_id=%s, event=%s",
+                event.telegram_id,
+                self._event_fingerprint(event),
+            )
+            return ServiceResult(
+                state=session.state,
+                reply_text="",
+                should_reply=False,
+                metadata={
+                    "duplicate_event": True,
+                    "session_id": session.session_id,
+                },
+            )
 
         logger.info(
             f"me_testa_service: handling event for telegram_id={event.telegram_id}, "
