@@ -160,7 +160,7 @@ class StudentSubmittedRetryFlowTest(unittest.IsolatedAsyncioTestCase):
         first_wrong_result = await self.service.handle_event(first_wrong_event)
 
         self.assertEqual(first_wrong_result.state, SessionState.WAITING_SOCRATIC_Q1)
-        self.assertIn("responde de novo só com a, b, c, d ou e", first_wrong_result.reply_text.lower())
+        self.assertIn("responde só com a, b, c, d ou e", first_wrong_result.reply_text.lower())
         session = self.session_service.repository.get_active_session(124, SessionFlow.ME_TESTA)  # type: ignore[attr-defined]
         assert session is not None
         snapshot_id = session.metadata.question_ref.snapshot_id

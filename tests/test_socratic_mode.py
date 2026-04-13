@@ -114,7 +114,7 @@ class SocraticModeNotTiredTest(unittest.IsolatedAsyncioTestCase):
 
         # Should receive retry prompt
         self.assertEqual(q1_result.state, SessionState.WAITING_SOCRATIC_Q1)
-        self.assertIn("responde de novo", q1_result.reply_text.lower())
+        self.assertIn("responde só com a, b, c, d ou e", q1_result.reply_text.lower())
 
         # Verify error was classified and review_card was prepared
         session = self.session_service.repository.get_active_session(123, SessionFlow.ME_TESTA)  # type: ignore[attr-defined]
@@ -343,7 +343,7 @@ class SocraticIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         q2_result = await self.service.handle_event(q1_response_event)
         self.assertEqual(q2_result.state, SessionState.WAITING_SOCRATIC_Q2)
-        self.assertIn("responde só com a, b, c, d ou e", q2_result.reply_text.lower())
+        self.assertIn("responde só com a letra", q2_result.reply_text.lower())
 
         # Q2 response → DONE
         q2_response_event = self.intake.normalize_update(
@@ -420,7 +420,7 @@ class SocraticServiceDirectTest(unittest.IsolatedAsyncioTestCase):
         result = await self.service.generate_q1(session)
 
         self.assertEqual(result.state, SessionState.WAITING_SOCRATIC_Q1)
-        self.assertIn("responde de novo", result.reply_text.lower())
+        self.assertIn("responde só com a, b, c, d ou e", result.reply_text.lower())
 
     async def test_direct_explanation_path(self) -> None:
         """Test skipping to direct explanation."""

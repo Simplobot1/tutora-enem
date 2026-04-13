@@ -117,8 +117,8 @@ class SocraticoService:
         session.state = SessionState.WAITING_SOCRATIC_Q1
         session.metadata.state = SessionState.WAITING_SOCRATIC_Q1
 
-        # Generate Q1 based on question content
-        q1_text = self._build_q1(snapshot.content, snapshot.subject or "")
+        # Generate Q1 with Claude hint if available, otherwise generic
+        q1_text = await self._generate_q1_text(snapshot)
 
         logger.info(f"socratico_service: Q1 generated for session={session.session_id}")
 
@@ -131,6 +131,42 @@ class SocraticoService:
                 "question_step": "q1",
             },
         )
+
+    async def _generate_q1_text(self, snapshot) -> str:
+        """Generate Socratic Q1 hint using Claude, or fallback to generic."""
+        if self.llm_client is not None and snapshot.content:
+            try:
+                alternatives_text = "\n".join(
+                    f"{alt.label}) {alt.text}" for alt in (snapshot.alternatives or [])
+                )
+                prompt = (
+                    f"Você é uma tutora socrática do ENEM. A aluna errou esta questão.\n\n"
+                    f"Enunciado:\n{snapshot.content}\n\n"
+                    f"Alternativas:\n{alternatives_text}\n\n"
+                    f"Gere UMA dica socrática curta (2-3 linhas) que:\n"
+                    f"1. NÃO revele a resposta correta\n"
+                    f"2. Aponte o conceito-chave ou a palavra central do enunciado que a aluna deve reler\n"
+                    f"3. Termine pedindo para ela responder só com A, B, C, D ou E\n\n"
+                    f"Seja direta e acolhedora. Não use saudações nem introduções longas."
+                )
+                response = await self.llm_client.create_message(
+                    model="claude-sonnet-4-6",
+                    max_tokens=200,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                if response.content and len(response.content) > 0:
+                    return response.content[0].text.strip()
+            except Exception as e:
+                logger.warning(f"socratico_service: failed to generate Q1 hint: {e}")
+
+        # Generic fallback
+        return "\n".join([
+            "Você errou a primeira tentativa, então vamos fazer uma releitura juntas. 🤔",
+            "",
+            "Relê o enunciado com atenção — geralmente tem uma palavra-chave que muda tudo.",
+            "",
+            "Qual alternativa você marca agora? Responde só com A, B, C, D ou E.",
+        ])
 
     async def process_q1_response(self, session: SessionRecord, student_response: str) -> ServiceResult:
         """Process student's response to Q1.
@@ -150,14 +186,9 @@ class SocraticoService:
         if parsed is not None:
             return await self._finalize_retry_attempt(session, parsed)
 
-        snapshot = session.question_snapshot
         session.state = SessionState.WAITING_SOCRATIC_Q2
         session.metadata.state = SessionState.WAITING_SOCRATIC_Q2
-        q2_text = self._build_q2(
-            snapshot.content,
-            snapshot.correct_alternative or "",
-            student_response,
-        )
+        q2_text = "Quase lá. Me responde só com a letra: A, B, C, D ou E."
 
         logger.info(f"socratico_service: Q2 generated for session={session.session_id}")
 
@@ -241,38 +272,6 @@ class SocraticoService:
                 "session_id": session.session_id,
                 "learning_path": "direct_explanation",
             },
-        )
-
-    def _build_q1(self, question_content: str, subject: str) -> str:
-        """Build first Socratic question (Q1).
-
-        Ask student to reconsider and commit to a new alternative.
-        """
-        return "\n".join(
-            [
-                "Você errou a primeira tentativa, então vamos fazer uma releitura estratégica juntas. 🤔",
-                "",
-                "Pensa no que a questão quer comparar: medidas preventivas parecidas.",
-                "O ponto central aqui é prevenção por carne crua ou malcozida.",
-                "",
-                "Relê as alternativas e me responde de novo só com A, B, C, D ou E.",
-            ]
-        )
-
-    def _build_q2(self, question_content: str, correct_alt: str, q1_response: str) -> str:
-        """Build second Socratic question (Q2).
-
-        Dig deeper based on Q1 response.
-        """
-        return "\n".join(
-            [
-                "Quase lá. Só preciso da resposta no formato certinho. 👀",
-                "",
-                "Quero a sua segunda tentativa objetiva.",
-                "Qual alternativa você marca agora?",
-                "",
-                "Responde só com A, B, C, D ou E.",
-            ]
         )
 
     def _build_explanation(self, correct_answer: str, explanation: str) -> str:
