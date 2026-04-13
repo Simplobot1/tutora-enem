@@ -56,6 +56,35 @@ class SocraticoService:
             logger.warning(f"socratico_service: failed to resolve correct answer: {e}")
         return None
 
+    async def _generate_first_attempt_explanation(self, snapshot, correct_answer: str, first_wrong_answer: str) -> str:
+        """Explain why the first attempt was wrong and why the correct answer is right."""
+        if self.llm_client is None or not correct_answer or not first_wrong_answer:
+            return ""
+        try:
+            alternatives_text = "\n".join(f"{alt.label}) {alt.text}" for alt in (snapshot.alternatives or []))
+            prompt = (
+                f"Você é uma tutora socrática do ENEM. A aluna errou na primeira tentativa e depois acertou.\n\n"
+                f"Enunciado:\n{snapshot.content}\n\n"
+                f"Alternativas:\n{alternatives_text}\n\n"
+                f"Primeira resposta da aluna (ERRADA): {first_wrong_answer}\n"
+                f"Resposta correta: {correct_answer}\n\n"
+                f"Gere uma explicação pedagógica que:\n"
+                f"1. Explique brevemente por que a alternativa {first_wrong_answer} está errada (1-2 linhas)\n"
+                f"2. Explique por que a alternativa {correct_answer} é correta (2-3 linhas)\n"
+                f"3. Para cada uma das outras alternativas incorretas, uma frase curta explicando por que está errada\n\n"
+                f"Seja direta, acolhedora e concisa. Não use introduções longas."
+            )
+            response = await self.llm_client.create_message(
+                model="claude-sonnet-4-6",
+                max_tokens=600,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if response.content and len(response.content) > 0:
+                return response.content[0].text.strip()
+        except Exception as e:
+            logger.warning(f"socratico_service: failed to generate first attempt explanation: {e}")
+        return ""
+
     async def _generate_explanation(self, snapshot, correct_answer: str) -> str:
         """Generate pedagogical explanation using Claude."""
         if self.llm_client is None or not correct_answer:
@@ -321,6 +350,7 @@ class SocraticoService:
         if student_answer_normalized == correct_answer:
             session.state = SessionState.WAITING_FOLLOWUP_CHAT
             session.metadata.state = SessionState.WAITING_FOLLOWUP_CHAT
+            first_wrong_answer = session.metadata.pending_student_answer or ""
             session.metadata.retry_attempts = 0
             session.metadata.review_card = ReviewCard()
             session.metadata.anki = AnkiMetadata(status="not_needed")
@@ -331,13 +361,21 @@ class SocraticoService:
                 apkg_generated=False,
             )
             logger.info(f"socratico_service: retry corrected for session={session.session_id}")
+
+            explanation_text = await self._generate_first_attempt_explanation(
+                session.question_snapshot, correct_answer, first_wrong_answer
+            )
+
+            reply_parts = [f"✅ Boa, agora foi. A correta é **{correct_answer}**."]
+            if first_wrong_answer:
+                reply_parts.append(f"\nNa primeira tentativa você marcou **{first_wrong_answer}** — veja por que não era essa:")
+            if explanation_text:
+                reply_parts += ["", explanation_text]
+            reply_parts += ["", "Se preferir, já me manda a próxima questão."]
+
             return ServiceResult(
                 state=SessionState.WAITING_FOLLOWUP_CHAT,
-                reply_text=(
-                    f"✅ Boa, agora foi. A correta é **{correct_answer}**.\n\n"
-                    "Gostei da insistência, porque você voltou para a questão e ajustou a leitura.\n"
-                    "Se quiser, me diz qual foi a virada no seu raciocínio ou já manda a próxima."
-                ),
+                reply_text="\n".join(reply_parts),
                 metadata={
                     "flow": session.flow.value,
                     "session_id": session.session_id,

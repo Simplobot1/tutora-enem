@@ -188,13 +188,39 @@ class MeTestaService:
                 "followup_chat": True,
             }
         else:
-            reply = "\n".join(
-                [
-                    "Tô com você nessa.",
-                    "Se quiser continuar nessa mesma questão, posso te explicar o racional, comparar as alternativas ou te orientar no `.apkg` do Anki.",
-                    "Se preferir seguir, já me manda a próxima questão.",
-                ]
-            )
+            # Always send full alternatives review when there's an active snapshot
+            alternatives_review = ""
+            if snapshot is not None:
+                # Resolve correct_answer on-the-fly if missing
+                if not correct_answer and self.socratico_service is not None:
+                    resolved = await self.socratico_service._resolve_correct_answer(snapshot)
+                    if resolved:
+                        correct_answer = resolved
+                        snapshot.correct_alternative = resolved
+
+                # Generate explanation if still missing
+                if correct_answer and not snapshot.explanation and self.socratico_service is not None:
+                    snapshot.explanation = await self.socratico_service._generate_explanation(snapshot, correct_answer)
+
+                if correct_answer and self.answer_service is not None:
+                    alternatives_review = self.answer_service._build_alternatives_review(snapshot, correct_answer)
+                    if snapshot.explanation and not any(alt.explanation for alt in (snapshot.alternatives or [])):
+                        alternatives_review = snapshot.explanation
+                elif snapshot.explanation:
+                    alternatives_review = snapshot.explanation
+
+            if alternatives_review:
+                reply = "\n".join(
+                    [
+                        "Aqui estão todas as alternativas comentadas:",
+                        "",
+                        alternatives_review,
+                        "",
+                        "Se preferir, já me manda a próxima questão.",
+                    ]
+                )
+            else:
+                reply = "Me manda a próxima questão completa com enunciado e alternativas A-E que eu sigo com você."
             metadata = {
                 "session_id": session.session_id,
                 "followup_chat": True,

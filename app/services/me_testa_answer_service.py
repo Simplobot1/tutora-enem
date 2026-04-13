@@ -277,6 +277,7 @@ class MeTestaAnswerService:
             builder_mode="review_card",
         )
         session.metadata.retry_attempts = 1
+        session.metadata.pending_student_answer = student_answer
 
         # Route to Socratic mode if available, else go direct
         if self.socratico_service is not None:

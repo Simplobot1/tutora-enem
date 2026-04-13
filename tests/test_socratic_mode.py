@@ -138,7 +138,7 @@ class SocraticModeNotTiredTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(retry_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertIn("agora foi", retry_result.reply_text.lower())
-        self.assertIn("virada no seu raciocínio", retry_result.reply_text.lower())
+        self.assertIn("primeira tentativa", retry_result.reply_text.lower())
 
 
 class SocraticModeTiredTest(unittest.IsolatedAsyncioTestCase):

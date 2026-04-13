@@ -241,7 +241,7 @@ class StudentSubmittedRetryFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retry_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
         self.assertTrue(retry_result.metadata["is_correct"])
         self.assertEqual(self.apkg_builder.calls, [])
-        self.assertIn("virada no seu raciocínio", retry_result.reply_text.lower())
+        self.assertIn("primeira tentativa", retry_result.reply_text.lower())
         session = self.session_service.repository.get_active_session(125, SessionFlow.ME_TESTA)  # type: ignore[attr-defined]
         assert session is not None
         snapshot_id = session.metadata.question_ref.snapshot_id
