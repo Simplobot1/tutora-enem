@@ -123,9 +123,11 @@ class MeTestaAnswerService:
             )
 
             if response.content and len(response.content) > 0:
-                answer = response.content[0].text.strip().upper()
-                if answer in "ABCDE":
-                    return answer
+                raw = response.content[0].text.strip().upper()
+                import re as _re
+                match = _re.search(r'\b([A-E])\b', raw)
+                if match:
+                    return match.group(1)
         except Exception as e:
             import logging
             logging.warning(f"Failed to resolve correct answer with Claude: {e}")

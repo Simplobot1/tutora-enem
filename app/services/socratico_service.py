@@ -47,9 +47,11 @@ class SocraticoService:
                 messages=[{"role": "user", "content": prompt}],
             )
             if response.content and len(response.content) > 0:
-                answer = response.content[0].text.strip().upper()
-                if answer in "ABCDE" and len(answer) == 1:
-                    return answer
+                raw = response.content[0].text.strip().upper()
+                # Extract first standalone letter A-E (handles "D)", "Letra D", "D." etc.)
+                match = re.search(r'\b([A-E])\b', raw)
+                if match:
+                    return match.group(1)
         except Exception as e:
             logger.warning(f"socratico_service: failed to resolve correct answer: {e}")
         return None
@@ -276,16 +278,22 @@ class SocraticoService:
 
     def _build_explanation(self, correct_answer: str, explanation: str) -> str:
         """Build final explanation message."""
-        return "\n".join(
-            [
-                f"A resposta correta é a alternativa **{correct_answer}**. ✅",
-                "",
-                "**Por quê?**",
-                explanation or "Ainda não tenho uma explicação confiável para essa questão específica, mas o gabarito correto já foi registrado.",
-                "",
-                "Isso não apaga o que você tentou antes; só mostra exatamente onde vale ajustar a leitura.",
-            ]
-        )
+        if not correct_answer:
+            return (
+                "Essa questão parece ter um gráfico ou dado visual que não consigo analisar só pelo texto. 📊\n\n"
+                "Você sabe qual é o gabarito? Me conta a alternativa correta e eu explico o raciocínio completo."
+            )
+        lines = [
+            f"A resposta correta é a alternativa **{correct_answer}**. ✅",
+            "",
+            "**Por quê?**",
+        ]
+        if explanation:
+            lines.append(explanation)
+        else:
+            lines.append("Não consegui gerar a explicação automática para essa questão. Me pergunta que explico o racional passo a passo!")
+        lines += ["", "Isso não apaga o que você tentou antes; só mostra exatamente onde vale ajustar a leitura."]
+        return "\n".join(lines)
 
     async def _finalize_retry_attempt(self, session: SessionRecord, student_answer: str) -> ServiceResult:
         if session.question_snapshot is None:
