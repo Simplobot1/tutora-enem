@@ -7,6 +7,9 @@ from typing import Protocol
 
 import httpx
 
+TELEGRAM_MESSAGE_LIMIT = 4096
+TELEGRAM_SAFE_MESSAGE_LIMIT = 3900
+
 
 @dataclass(slots=True)
 class OutboundMessage:
@@ -51,24 +54,25 @@ class HttpTelegramGateway:
         if not self.bot_token:
             raise ValueError("telegram bot token is required")
 
-        payload: dict[str, object] = {
-            "chat_id": chat_id,
-            "text": text,
-        }
-        if reply_markup is not None:
-            payload["reply_markup"] = reply_markup
-
         async with httpx.AsyncClient(base_url=self.base_url, timeout=15.0) as client:
-            response = await client.post(
-                f"/bot{self.bot_token}/sendMessage",
-                json=payload,
-            )
-            if response.is_error:
-                raise httpx.HTTPStatusError(
-                    f"Telegram sendMessage failed: {response.text}",
-                    request=response.request,
-                    response=response,
+            for index, chunk in enumerate(split_telegram_message(text)):
+                payload: dict[str, object] = {
+                    "chat_id": chat_id,
+                    "text": chunk,
+                }
+                if reply_markup is not None and index == 0:
+                    payload["reply_markup"] = reply_markup
+
+                response = await client.post(
+                    f"/bot{self.bot_token}/sendMessage",
+                    json=payload,
                 )
+                if response.is_error:
+                    raise httpx.HTTPStatusError(
+                        f"Telegram sendMessage failed: {response.text}",
+                        request=response.request,
+                        response=response,
+                    )
 
     async def send_document(self, chat_id: int, file_path: str, caption: str | None = None) -> None:
         if not self.bot_token:
@@ -100,3 +104,33 @@ class HttpTelegramGateway:
         if path.suffix.lower() == ".apkg":
             return "application/vnd.anki"
         return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+
+
+def split_telegram_message(text: str, limit: int = TELEGRAM_SAFE_MESSAGE_LIMIT) -> list[str]:
+    if limit <= 0 or limit > TELEGRAM_MESSAGE_LIMIT:
+        raise ValueError("limit must be between 1 and Telegram's message limit")
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        split_at = _find_split_point(remaining, limit)
+        chunk = remaining[:split_at].rstrip()
+        if not chunk:
+            chunk = remaining[:limit]
+            split_at = limit
+        chunks.append(chunk)
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def _find_split_point(text: str, limit: int) -> int:
+    min_useful_split = max(1, limit // 2)
+    for separator in ("\n\n", "\n", " "):
+        split_at = text.rfind(separator, 0, limit + 1)
+        if split_at >= min_useful_split:
+            return split_at + (len(separator) if separator == "\n\n" else 0)
+    return limit

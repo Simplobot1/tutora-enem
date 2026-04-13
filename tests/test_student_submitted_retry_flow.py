@@ -50,6 +50,16 @@ class FakeApkgBuilder:
         return f"/tmp/{session.session_id}.apkg"
 
 
+class FakeOcrService:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls: list[str] = []
+
+    async def extract_question_as_text(self, file_id: str) -> str:
+        self.calls.append(file_id)
+        return self.text
+
+
 class StudentSubmittedRetryFlowTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.intake = IntakeService()
@@ -242,12 +252,68 @@ class StudentSubmittedRetryFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(retry_result.metadata["is_correct"])
         self.assertEqual(self.apkg_builder.calls, [])
         self.assertIn("primeira tentativa", retry_result.reply_text.lower())
+        self.assertIn("o que te puxou", retry_result.reply_text.lower())
+        self.assertIn("questão comentada", retry_result.reply_text.lower())
+        self.assertIn("A) Teníase.** — correta", retry_result.reply_text)
+        self.assertIn("B) Filariose.** — incorreta", retry_result.reply_text)
         session = self.session_service.repository.get_active_session(125, SessionFlow.ME_TESTA)  # type: ignore[attr-defined]
         assert session is not None
         snapshot_id = session.metadata.question_ref.snapshot_id
         assert snapshot_id is not None
         self.assertTrue(self.submitted_questions_repository.rows[snapshot_id]["answered_correct"])
         self.assertFalse(self.submitted_questions_repository.rows[snapshot_id]["sent_to_anki"])
+
+    async def test_photo_question_uses_same_wrong_then_correct_retry_flow(self) -> None:
+        fake_ocr = FakeOcrService(QUESTION_92)
+        self.entry_service.ocr_service = fake_ocr
+        intake_event = self.intake.normalize_update(
+            {
+                "update_id": 20,
+                "message": {
+                    "message_id": 120,
+                    "photo": [{"file_id": "small"}, {"file_id": "photo_question_92"}],
+                    "chat": {"id": 325},
+                    "from": {"id": 127},
+                },
+            }
+        )
+        intake_result = await self.service.handle_event(intake_event)
+
+        self.assertEqual(intake_result.state, SessionState.WAITING_ANSWER)
+        self.assertEqual(fake_ocr.calls, ["photo_question_92"])
+
+        first_wrong_event = self.intake.normalize_update(
+            {
+                "update_id": 21,
+                "message": {
+                    "message_id": 121,
+                    "text": "B",
+                    "chat": {"id": 325},
+                    "from": {"id": 127},
+                },
+            }
+        )
+        await self.service.handle_event(first_wrong_event)
+
+        retry_correct_event = self.intake.normalize_update(
+            {
+                "update_id": 22,
+                "message": {
+                    "message_id": 122,
+                    "text": "A",
+                    "chat": {"id": 325},
+                    "from": {"id": 127},
+                },
+            }
+        )
+        retry_result = await self.service.handle_event(retry_correct_event)
+
+        self.assertEqual(retry_result.state, SessionState.WAITING_FOLLOWUP_CHAT)
+        self.assertTrue(retry_result.metadata["is_correct"])
+        self.assertIn("o que te puxou", retry_result.reply_text.lower())
+        self.assertIn("A) Teníase.** — correta", retry_result.reply_text)
+        self.assertIn("B) Filariose.** — incorreta", retry_result.reply_text)
+        self.assertEqual(self.apkg_builder.calls, [])
 
     async def test_student_can_chat_with_tutora_after_second_error(self) -> None:
         intake_event = self.intake.normalize_update(

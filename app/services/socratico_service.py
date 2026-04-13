@@ -354,6 +354,7 @@ class SocraticoService:
             session.metadata.retry_attempts = 0
             session.metadata.review_card = ReviewCard()
             session.metadata.anki = AnkiMetadata(status="not_needed")
+            self.alternative_explanation_service.ensure_alternative_explanations(session)
             self._mark_submitted_question_result(
                 session=session,
                 answered_correct=True,
@@ -365,12 +366,22 @@ class SocraticoService:
             explanation_text = await self._generate_first_attempt_explanation(
                 session.question_snapshot, correct_answer, first_wrong_answer
             )
+            alternatives_review = self._build_alternatives_review(
+                session.question_snapshot,
+                correct_answer,
+            )
 
             reply_parts = [f"✅ Boa, agora foi. A correta é **{correct_answer}**."]
             if first_wrong_answer:
-                reply_parts.append(f"\nNa primeira tentativa você marcou **{first_wrong_answer}** — veja por que não era essa:")
+                reply_parts += [
+                    "",
+                    f"Na primeira tentativa você marcou **{first_wrong_answer}**.",
+                    f"Antes de seguir, tenta me dizer em uma frase: o que te puxou para a alternativa **{first_wrong_answer}**?",
+                ]
             if explanation_text:
-                reply_parts += ["", explanation_text]
+                reply_parts += ["", "Sobre a primeira tentativa:", "", explanation_text]
+            if alternatives_review:
+                reply_parts += ["", "Aqui vai a questão comentada para comparar as alternativas:", "", alternatives_review]
             reply_parts += ["", "Se preferir, já me manda a próxima questão."]
 
             return ServiceResult(
@@ -445,6 +456,20 @@ class SocraticoService:
         if match is None:
             return None
         return match.group(1)
+
+    def _build_alternatives_review(self, snapshot, correct_answer: str) -> str:
+        if not snapshot.alternatives:
+            return ""
+
+        lines: list[str] = []
+        for alternative in snapshot.alternatives:
+            if alternative.label == correct_answer:
+                explanation = alternative.explanation or snapshot.explanation or "Esta é a alternativa correta."
+                lines.append(f"**{alternative.label}) {alternative.text}** — correta\n{explanation}")
+            else:
+                explanation = alternative.explanation or "Compare com a alternativa correta indicada no gabarito."
+                lines.append(f"**{alternative.label}) {alternative.text}** — incorreta\n{explanation}")
+        return "\n".join(lines)
 
     def _mark_submitted_question_result(
         self,
