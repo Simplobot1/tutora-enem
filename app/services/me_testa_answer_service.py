@@ -76,11 +76,14 @@ class MeTestaAnswerService:
                 should_reply=True,
             )
 
-        # If no gabarito, resolve using Claude
+        # If no gabarito, resolve using Claude and generate explanation
         if not correct_answer and self.llm_client is not None:
             correct_answer = await self._resolve_correct_answer(snapshot)
             if correct_answer:
                 snapshot.correct_alternative = correct_answer
+                # Generate explanation for student-submitted questions
+                if not snapshot.explanation:
+                    snapshot.explanation = await self._generate_explanation(snapshot, correct_answer)
 
         # Check if answer is correct
         is_correct = student_answer_upper == correct_answer if correct_answer else False
@@ -124,6 +127,40 @@ class MeTestaAnswerService:
             logging.warning(f"Failed to resolve correct answer with Claude: {e}")
 
         return None
+
+    async def _generate_explanation(self, snapshot, correct_answer: str) -> str:
+        """Generate pedagogical explanation for a question using Claude."""
+        if self.llm_client is None or not correct_answer:
+            return ""
+
+        try:
+            alternatives_text = "\n".join(
+                f"{alt.label}) {alt.text}" for alt in snapshot.alternatives
+            )
+            prompt = (
+                f"Você é um tutor expert em ENEM. Gere uma explicação pedagógica clara e concisa para esta questão.\n\n"
+                f"Enunciado:\n{snapshot.content}\n\n"
+                f"Alternativas:\n{alternatives_text}\n\n"
+                f"Resposta correta: {correct_answer}\n\n"
+                f"Crie uma explicação que:\n"
+                f"1. Explique POR QUE a alternativa {correct_answer} é correta (2-3 linhas)\n"
+                f"2. Para cada alternativa incorreta, uma frase explicando por que está errada\n\n"
+                f"Formato: Mantenha conciso e pedagógico, focando no aprendizado."
+            )
+
+            response = await self.llm_client.create_message(
+                model="claude-sonnet-4-6",
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            if response.content and len(response.content) > 0:
+                return response.content[0].text.strip()
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to generate explanation with Claude: {e}")
+
+        return ""
 
     async def _handle_correct_answer(self, session: SessionRecord) -> ServiceResult:
         """Handle case where student answered correctly."""
