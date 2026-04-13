@@ -176,6 +176,17 @@ class MeTestaAnswerService:
         snapshot = session.question_snapshot
         if snapshot is not None:
             self.alternative_explanation_service.ensure_alternative_explanations(session)
+
+        # Generate Claude explanation if alternatives have no individual explanations
+        if snapshot is not None and self.llm_client is not None:
+            correct_answer = snapshot.correct_alternative or ""
+            has_alt_explanations = any(
+                alt.explanation for alt in (snapshot.alternatives or [])
+            )
+            if not has_alt_explanations and correct_answer:
+                if not snapshot.explanation:
+                    snapshot.explanation = await self._generate_explanation(snapshot, correct_answer)
+
         session.state = SessionState.WAITING_FOLLOWUP_CHAT
         session.metadata.state = SessionState.WAITING_FOLLOWUP_CHAT
         session.metadata.anki = AnkiMetadata(status="not_needed")
@@ -190,6 +201,12 @@ class MeTestaAnswerService:
             apkg_generated=False,
         )
         alternatives_review = self._build_alternatives_review(snapshot, snapshot.correct_alternative or "") if snapshot is not None else ""
+
+        # If alternatives_review has no individual explanations, use the general explanation
+        if snapshot is not None and snapshot.explanation:
+            has_specific = any(alt.explanation for alt in (snapshot.alternatives or []))
+            if not has_specific:
+                alternatives_review = snapshot.explanation
 
         return ServiceResult(
             state=SessionState.WAITING_FOLLOWUP_CHAT,
