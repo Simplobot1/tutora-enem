@@ -51,14 +51,27 @@ class SessionRecordFromPersistedRowTest(unittest.TestCase):
 @dataclass(slots=True)
 class StubMeTestaService:
     seen_event: InboundEvent | None = None
+    calls: int = 0
 
     async def handle_event(self, event: InboundEvent) -> ServiceResult:
         self.seen_event = event
+        self.calls += 1
         return ServiceResult(
             state=SessionState.WAITING_ANSWER,
             reply_text="webhook stub",
             metadata={"path": "telegram_webhook"},
         )
+
+
+@dataclass(slots=True)
+class StubTelegramGateway:
+    messages: list[tuple[int, str]]
+
+    async def send_text(self, chat_id: int, text: str, reply_markup: dict | None = None) -> None:
+        self.messages.append((chat_id, text))
+
+    async def send_document(self, chat_id: int, file_path: str, caption: str | None = None) -> None:
+        raise AssertionError("send_document should not be called")
 
 
 @dataclass(slots=True)
@@ -98,6 +111,66 @@ class TelegramWebhookApiTest(unittest.TestCase):
         self.assertIsNotNone(me_testa_service.seen_event)
         assert me_testa_service.seen_event is not None
         self.assertEqual(me_testa_service.seen_event.chat_id, 321)
+
+    def test_admin_command_bypasses_me_testa_session_flow(self) -> None:
+        me_testa_service = StubMeTestaService()
+        gateway = StubTelegramGateway(messages=[])
+        runtime = RuntimeServices(
+            intake_service=StubIntakeService(),
+            session_service=object(),
+            entry_service=object(),
+            me_testa_service=me_testa_service,
+            telegram_gateway=gateway,
+        )
+        set_runtime_services_override(lambda: runtime)
+        try:
+            response = asyncio.run(self._request({
+                "update_id": 11,
+                "message": {
+                    "message_id": 101,
+                    "text": "/admin",
+                    "chat": {"id": 321},
+                    "from": {"id": 123},
+                },
+            }))
+        finally:
+            set_runtime_services_override(None)
+
+        body = response.json()
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(body["action"], "admin_unavailable")
+        self.assertEqual(me_testa_service.calls, 0)
+        self.assertEqual(gateway.messages, [(321, "Admin ainda não está disponível por aqui.")])
+
+    def test_unknown_slash_command_bypasses_me_testa_session_flow(self) -> None:
+        me_testa_service = StubMeTestaService()
+        gateway = StubTelegramGateway(messages=[])
+        runtime = RuntimeServices(
+            intake_service=StubIntakeService(),
+            session_service=object(),
+            entry_service=object(),
+            me_testa_service=me_testa_service,
+            telegram_gateway=gateway,
+        )
+        set_runtime_services_override(lambda: runtime)
+        try:
+            response = asyncio.run(self._request({
+                "update_id": 12,
+                "message": {
+                    "message_id": 102,
+                    "text": "/qualquer",
+                    "chat": {"id": 321},
+                    "from": {"id": 123},
+                },
+            }))
+        finally:
+            set_runtime_services_override(None)
+
+        body = response.json()
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(body["action"], "unknown_command")
+        self.assertEqual(me_testa_service.calls, 0)
+        self.assertEqual(gateway.messages, [(321, "Não reconheci esse comando. Para reiniciar a questão, use /nova.")])
 
     async def _request(self, payload: dict) -> httpx.Response:
         transport = httpx.ASGITransport(app=app)

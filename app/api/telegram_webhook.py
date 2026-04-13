@@ -13,8 +13,15 @@ from app.services.profile_service import ProfileService, format_profile
 
 router = APIRouter(prefix="/webhooks", tags=["telegram"])
 
-_RELATORIO_COMMANDS = {"/relatorio", "/relatorio@"}
-_PERFIL_COMMANDS = {"/perfil", "/perfil@"}
+_RELATORIO_COMMANDS = {"/relatorio"}
+_PERFIL_COMMANDS = {"/perfil"}
+_ADMIN_COMMANDS = {"/admin"}
+_ME_TESTA_COMMANDS = {
+    "/nova",
+    "/novo",
+    "/reset",
+    "/start",
+}
 
 
 def _parse_relatorio_dias(text: str) -> int:
@@ -27,6 +34,13 @@ def _parse_relatorio_dias(text: str) -> int:
             except ValueError:
                 pass
     return 30
+
+
+def _command_name(text: str) -> str:
+    command = text.split(maxsplit=1)[0].strip().lower()
+    if "@" in command:
+        command = command.split("@", 1)[0]
+    return command
 
 
 @router.post("/telegram", status_code=status.HTTP_202_ACCEPTED)
@@ -42,7 +56,8 @@ async def telegram_webhook(
     # Fast-path: /relatorio command
     message = payload.get("message") or {}
     text = (message.get("text") or "").strip()
-    if text.startswith(tuple(_RELATORIO_COMMANDS)):
+    command = _command_name(text)
+    if command in _RELATORIO_COMMANDS:
         chat_id: int = message.get("chat", {}).get("id", 0)
         telegram_id: int = message.get("from", {}).get("id", chat_id)
         dias = _parse_relatorio_dias(text)
@@ -60,7 +75,7 @@ async def telegram_webhook(
         return {"ok": True, "action": "relatorio_sent", "dias": dias}
 
     # Fast-path: /perfil command
-    if text.startswith(tuple(_PERFIL_COMMANDS)):
+    if command in _PERFIL_COMMANDS:
         chat_id: int = message.get("chat", {}).get("id", 0)
         telegram_id: int = message.get("from", {}).get("id", chat_id)
 
@@ -80,6 +95,25 @@ async def telegram_webhook(
         else:
             await services.telegram_gateway.send_text(chat_id, profile_text)
         return {"ok": True, "action": "perfil_sent"}
+
+    # Fast-path: /admin command
+    if command in _ADMIN_COMMANDS:
+        chat_id: int = message.get("chat", {}).get("id", 0)
+        services = resolve_runtime_services()
+        await services.telegram_gateway.send_text(
+            chat_id,
+            "Admin ainda não está disponível por aqui.",
+        )
+        return {"ok": True, "action": "admin_unavailable"}
+
+    if command.startswith("/") and command not in _ME_TESTA_COMMANDS:
+        chat_id: int = message.get("chat", {}).get("id", 0)
+        services = resolve_runtime_services()
+        await services.telegram_gateway.send_text(
+            chat_id,
+            "Não reconheci esse comando. Para reiniciar a questão, use /nova.",
+        )
+        return {"ok": True, "action": "unknown_command", "command": command}
 
     services = resolve_runtime_services()
     intake_service = services.intake_service
