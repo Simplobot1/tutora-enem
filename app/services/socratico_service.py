@@ -22,10 +22,64 @@ logger = logging.getLogger(__name__)
 class SocraticoService:
     """Guide student through Socratic questioning after incorrect answer."""
 
-    def __init__(self, apkg_builder=None, submitted_questions_repository: SubmittedQuestionsRepository | None = None) -> None:
+    def __init__(self, apkg_builder=None, submitted_questions_repository: SubmittedQuestionsRepository | None = None, llm_client=None) -> None:
         self.apkg_builder = apkg_builder
         self.submitted_questions_repository = submitted_questions_repository
+        self.llm_client = llm_client
         self.alternative_explanation_service = AlternativeExplanationService()
+
+    async def _resolve_correct_answer(self, snapshot) -> str | None:
+        """Use Claude to resolve correct answer when not in database."""
+        if self.llm_client is None or not snapshot.alternatives:
+            return None
+        try:
+            alternatives_text = "\n".join(f"{alt.label}) {alt.text}" for alt in snapshot.alternatives)
+            prompt = (
+                f"Você é um especialista em questões do ENEM. "
+                f"Analise esta questão e determine qual é a alternativa correta.\n\n"
+                f"Enunciado:\n{snapshot.content}\n\n"
+                f"Alternativas:\n{alternatives_text}\n\n"
+                f"Responda APENAS com a letra da alternativa correta (A, B, C, D ou E)."
+            )
+            response = await self.llm_client.create_message(
+                model="claude-sonnet-4-6",
+                max_tokens=100,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if response.content and len(response.content) > 0:
+                answer = response.content[0].text.strip().upper()
+                if answer in "ABCDE" and len(answer) == 1:
+                    return answer
+        except Exception as e:
+            logger.warning(f"socratico_service: failed to resolve correct answer: {e}")
+        return None
+
+    async def _generate_explanation(self, snapshot, correct_answer: str) -> str:
+        """Generate pedagogical explanation using Claude."""
+        if self.llm_client is None or not correct_answer:
+            return ""
+        try:
+            alternatives_text = "\n".join(f"{alt.label}) {alt.text}" for alt in snapshot.alternatives)
+            prompt = (
+                f"Você é uma tutora expert em ENEM. Gere uma explicação pedagógica clara e concisa para esta questão.\n\n"
+                f"Enunciado:\n{snapshot.content}\n\n"
+                f"Alternativas:\n{alternatives_text}\n\n"
+                f"Resposta correta: {correct_answer}\n\n"
+                f"Crie uma explicação que:\n"
+                f"1. Explique POR QUE a alternativa {correct_answer} é correta (2-3 linhas)\n"
+                f"2. Para cada alternativa incorreta, uma frase explicando por que está errada\n\n"
+                f"Formato: Mantenha conciso e pedagógico, focando no aprendizado."
+            )
+            response = await self.llm_client.create_message(
+                model="claude-sonnet-4-6",
+                max_tokens=800,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if response.content and len(response.content) > 0:
+                return response.content[0].text.strip()
+        except Exception as e:
+            logger.warning(f"socratico_service: failed to generate explanation: {e}")
+        return ""
 
     async def route_incorrect_answer(self, session: SessionRecord) -> ServiceResult:
         """Determine whether to use Socratic mode or direct explanation.
@@ -153,6 +207,14 @@ class SocraticoService:
         session.state = SessionState.WAITING_FOLLOWUP_CHAT
         session.metadata.state = SessionState.WAITING_FOLLOWUP_CHAT
 
+        # Resolve correct answer and explanation with Claude if missing
+        if not snapshot.correct_alternative:
+            resolved = await self._resolve_correct_answer(snapshot)
+            if resolved:
+                snapshot.correct_alternative = resolved
+        if not snapshot.explanation and snapshot.correct_alternative:
+            snapshot.explanation = await self._generate_explanation(snapshot, snapshot.correct_alternative)
+
         # Build explanation message
         explanation_text = self._build_explanation(
             snapshot.correct_alternative or "",
@@ -236,6 +298,17 @@ class SocraticoService:
             raise TypeError("session.metadata must be SessionMetadata")
 
         correct_answer = session.question_snapshot.correct_alternative or ""
+        # If no correct answer in snapshot, resolve with Claude
+        if not correct_answer:
+            resolved = await self._resolve_correct_answer(session.question_snapshot)
+            if resolved:
+                correct_answer = resolved
+                session.question_snapshot.correct_alternative = correct_answer
+        # If no explanation, generate with Claude
+        if not session.question_snapshot.explanation and correct_answer:
+            session.question_snapshot.explanation = await self._generate_explanation(
+                session.question_snapshot, correct_answer
+            )
         # Normalize answer to uppercase (defensive: may receive lowercase from parse)
         student_answer_normalized = student_answer.strip().upper()
         if student_answer_normalized == correct_answer:

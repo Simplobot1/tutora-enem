@@ -69,6 +69,7 @@ def get_runtime_services() -> RuntimeServices:
     socratico_service = SocraticoService(
         apkg_builder=apkg_builder,
         submitted_questions_repository=submitted_questions_repository,
+        llm_client=llm_client,
     )
     answer_service = MeTestaAnswerService(
         repository=session_repository,
