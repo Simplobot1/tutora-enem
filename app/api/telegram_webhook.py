@@ -39,7 +39,10 @@ def _parse_relatorio_dias(text: str) -> int:
 
 
 def _command_name(text: str) -> str:
-    command = text.split(maxsplit=1)[0].strip().lower()
+    parts = text.split(maxsplit=1)
+    if not parts:
+        return ""
+    command = parts[0].strip().lower()
     if "@" in command:
         command = command.split("@", 1)[0]
     return command
