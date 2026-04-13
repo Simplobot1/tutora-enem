@@ -78,12 +78,16 @@ class MeTestaAnswerService:
 
         # If no gabarito, resolve using Claude and generate explanation
         if not correct_answer and self.llm_client is not None:
-            correct_answer = await self._resolve_correct_answer(snapshot)
-            if correct_answer:
+            resolved = await self._resolve_correct_answer(snapshot)
+            if resolved:
+                correct_answer = resolved
                 snapshot.correct_alternative = correct_answer
                 # Generate explanation for student-submitted questions
                 if not snapshot.explanation:
                     snapshot.explanation = await self._generate_explanation(snapshot, correct_answer)
+
+        # Ensure correct_answer is always a string
+        correct_answer = correct_answer or ""
 
         # Check if answer is correct
         is_correct = student_answer_upper == correct_answer if correct_answer else False

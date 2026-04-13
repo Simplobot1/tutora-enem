@@ -40,8 +40,8 @@ class ErrorClassification:
         - If adjacent alternatives (A/B, C/D, etc) → Interpretação (misread)
         - Otherwise → Atenção (careless slip)
         """
-        student_answer_upper = student_answer.strip().upper()
-        correct_answer_upper = correct_answer.strip().upper()
+        student_answer_upper = (student_answer or "").strip().upper()
+        correct_answer_upper = (correct_answer or "").strip().upper()
 
         # Check if explanationhints at conceptual error
         # Keywords suggest the explanation is about concepts/understanding
