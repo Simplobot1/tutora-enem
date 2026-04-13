@@ -29,7 +29,6 @@ class AlternativeExplanationService:
                 alternative_text=alternative.text,
                 correct_label=correct_answer,
                 correct_text=correct_text,
-                general_explanation=snapshot.explanation,
             )
 
     def _build_incorrect_alternative_explanation(
@@ -38,19 +37,13 @@ class AlternativeExplanationService:
         alternative_text: str,
         correct_label: str,
         correct_text: str,
-        general_explanation: str,
     ) -> str:
         correct_reference = (
             f"A alternativa {correct_label} ({correct_text}) é a correta."
             if correct_label and correct_text
             else "Compare com a alternativa correta indicada no gabarito."
         )
-        explanation_reference = (
-            f" A explicação da correta é: {general_explanation}"
-            if general_explanation
-            else ""
-        )
         return (
             f"Incorreta: {alternative_text} não corresponde ao gabarito confirmado. "
-            f"{correct_reference}{explanation_reference}"
+            f"{correct_reference}"
         )

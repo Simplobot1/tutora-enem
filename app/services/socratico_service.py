@@ -467,9 +467,44 @@ class SocraticoService:
                 explanation = alternative.explanation or snapshot.explanation or "Esta é a alternativa correta."
                 lines.append(f"**{alternative.label}) {alternative.text}** — correta\n{explanation}")
             else:
-                explanation = alternative.explanation or "Compare com a alternativa correta indicada no gabarito."
+                explanation = self._clean_incorrect_alternative_explanation(
+                    alternative.explanation,
+                    alternative.text,
+                    correct_answer,
+                    self._alternative_text(snapshot, correct_answer),
+                ) or "Compare com a alternativa correta indicada no gabarito."
                 lines.append(f"**{alternative.label}) {alternative.text}** — incorreta\n{explanation}")
         return "\n".join(lines)
+
+    def _alternative_text(self, snapshot, label: str) -> str:
+        for alternative in snapshot.alternatives or []:
+            if alternative.label == label:
+                return alternative.text
+        return ""
+
+    def _clean_incorrect_alternative_explanation(
+        self,
+        explanation: str,
+        alternative_text: str,
+        correct_answer: str,
+        correct_text: str,
+    ) -> str:
+        if not explanation:
+            return ""
+        bloated_marker = " A explicação da correta é: "
+        if bloated_marker in explanation:
+            return explanation.split(bloated_marker, 1)[0].strip()
+        if len(explanation) > 700 or "## Por que" in explanation or "\n---" in explanation:
+            correct_reference = (
+                f"A alternativa {correct_answer} ({correct_text}) é a correta."
+                if correct_answer and correct_text
+                else "Compare com a alternativa correta indicada no gabarito."
+            )
+            return (
+                f"Incorreta: {alternative_text} não corresponde ao gabarito confirmado. "
+                f"{correct_reference}"
+            )
+        return explanation
 
     def _mark_submitted_question_result(
         self,

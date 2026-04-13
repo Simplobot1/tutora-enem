@@ -80,6 +80,34 @@ class MeTestaAnswerServiceTest(unittest.TestCase):
         self.assertIn("A) São Paulo** — ❌ incorreta", result.reply_text)
         self.assertTrue(result.metadata.get("is_correct"))
 
+    def test_process_correct_answer_does_not_repeat_full_explanation_per_wrong_alternative(self) -> None:
+        session = self._create_session_with_question()
+        assert session.question_snapshot is not None
+        full_explanation = "\n".join(
+            [
+                "## Por que a alternativa C é correta?",
+                "Brasília é a capital federal atual.",
+                "---",
+                "## Por que as outras alternativas estão erradas?",
+                "B) Rio de Janeiro foi capital no passado.",
+            ]
+        )
+        session.question_snapshot.explanation = full_explanation
+        for alternative in session.question_snapshot.alternatives:
+            alternative.explanation = ""
+
+        result = self._run_async(
+            self.service.process_answer(
+                telegram_id=3000,
+                student_answer="C",
+                session=session,
+            )
+        )
+
+        self.assertEqual(result.reply_text.count("## Por que a alternativa C é correta?"), 1)
+        self.assertEqual(result.reply_text.count("## Por que as outras alternativas estão erradas?"), 1)
+        self.assertIn("A alternativa C (Brasília) é a correta.", result.reply_text)
+
     def test_process_incorrect_answer_sets_anki_status(self) -> None:
         """Test M2-S3: Incorrect answer sets anki_status = queued_local_build."""
         session = self._create_session_with_question()
