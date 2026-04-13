@@ -100,18 +100,45 @@ Ultima atualizacao: 2026-04-05 | Agentes: @dev (Dex), @aiox-master (Orion)
 - `supabase/migrations/` — Schema com locking
 - `scripts/{ingest_enem,apkg_builder,build_pending_apkgs}.py` — Automação
 
-## 🚀 Próximos Passos (2026-04-11)
+## 🔧 Fixes Aplicados (2026-04-12 23:43 - 23:48)
 
-### IMEDIATO — Deploy Hetzner + Docker
-1. SSH ao VPS Hetzner
-2. Docker + Docker Compose install
-3. Clone repo + Build image
-4. CI/CD com GitHub Actions
-5. Webhook Telegram permanente
+### Commit 7be1b68: Remove ocr_cache Parameter
+**Problema:** Runtime.py passava parâmetro `ocr_cache` que MeTestaEntryService não esperava mais
+- ❌ **TypeError:** `MeTestaEntryService.__init__() got an unexpected keyword argument 'ocr_cache'`
+- **Impacto:** 500 error em TODOS os webhooks do Telegram
 
-**Ver:** `_ctx/DEPLOY_HETZNER_CHECKLIST.md` (pronto amanhã)
+**Solução:**
+```python
+# app/api/runtime.py
+- Removido: from app.services.ocr_cache import OcrCache
+- Removido: ocr_cache = OcrCache()
+- Removido: ocr_cache=ocr_cache (parâmetro na instantiação)
 
-### Médio prazo (depois de deploy)
-1. Testes E2E com dados reais no Telegram
-2. NotebookLM setup (se necessário)
-3. Pagamento/Access via Telegram (M5)
+# tests/test_m5_s1_ocr_photo.py  
+- Removida classe TestOcrCache (3 métodos)
+- Removido test_handle_image_intake_cache_hit
+```
+
+**Validação:** ✅ 142 testes passando
+
+### Commit 4d733db: Add --no-cache to Docker Build
+**Problema:** Docker estava usando cache de build anterior (imagem com código antigo)
+- Deploy passava no healthcheck mas webhook ainda retornava erro 500
+
+**Solução:**
+```yaml
+# .github/workflows/deploy.yml
+- docker build --no-cache -t tutora-api:latest .  (linhas 55 + 73)
+```
+
+**Validação:** ✅ Deploy completou com sucesso em 1m33s
+
+### 📦 Deployment Status
+- ✅ **Código:** Corrigido localmente (142 testes passando)
+- ✅ **Git:** Commits enviados para origin/main (7be1b68, 4d733db)
+- ✅ **Docker:** Imagem reconstruída SEM cache em Hetzner
+- ✅ **API:** Health endpoint respondendo (20:48Z)
+
+### 🧪 AGUARDANDO
+- ⏳ Webhook do Telegram pode estar apontando para domínio antigo
+- ⏳ Verificar: https://tutora-sofia.simplobot.com.br/webhooks/telegram (domínio correto)

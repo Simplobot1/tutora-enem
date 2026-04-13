@@ -12,7 +12,6 @@ from app.repositories.questions_repository import QuestionsRepository
 from app.repositories.submitted_questions_repository import InMemorySubmittedQuestionsRepository, SupabaseSubmittedQuestionsRepository
 from app.repositories.study_sessions_repository import InMemoryStudySessionsRepository, SupabaseStudySessionsRepository
 from app.services.intake_service import IntakeService
-from app.services.ocr_cache import OcrCache
 from app.services.ocr_service import OcrService
 try:
     from app.services.apkg_builder_service import ApkgBuilderService
@@ -57,7 +56,6 @@ def get_runtime_services() -> RuntimeServices:
         else InMemorySubmittedQuestionsRepository()
     )
     question_snapshot_service = QuestionSnapshotService()
-    ocr_cache = OcrCache()
     llm_client = LLMClient(api_key=settings.anthropic_api_key)
     ocr_service = OcrService(llm_client=llm_client, telegram_bot_token=settings.telegram_bot_token or "")
     entry_service = MeTestaEntryService(
@@ -66,7 +64,6 @@ def get_runtime_services() -> RuntimeServices:
         questions_repository=questions_repository,
         submitted_questions_repository=submitted_questions_repository,
         ocr_service=ocr_service,
-        ocr_cache=ocr_cache,
     )
     apkg_builder = ApkgBuilderService() if ApkgBuilderService is not None else None
     socratico_service = SocraticoService(
@@ -77,6 +74,7 @@ def get_runtime_services() -> RuntimeServices:
         repository=session_repository,
         socratico_service=socratico_service,
         submitted_questions_repository=submitted_questions_repository,
+        llm_client=llm_client,
     )
     telegram_gateway: TelegramGateway
     if settings.telegram_bot_token:
