@@ -172,6 +172,68 @@ class TelegramWebhookApiTest(unittest.TestCase):
         self.assertEqual(me_testa_service.calls, 0)
         self.assertEqual(gateway.messages, [(321, "Não reconheci esse comando. Para reiniciar a questão, use /nova.")])
 
+    def test_suporte_command_bypasses_me_testa_session_flow(self) -> None:
+        me_testa_service = StubMeTestaService()
+        gateway = StubTelegramGateway(messages=[])
+        runtime = RuntimeServices(
+            intake_service=StubIntakeService(),
+            session_service=object(),
+            entry_service=object(),
+            me_testa_service=me_testa_service,
+            telegram_gateway=gateway,
+        )
+        set_runtime_services_override(lambda: runtime)
+        try:
+            response = asyncio.run(self._request({
+                "update_id": 13,
+                "message": {
+                    "message_id": 103,
+                    "text": "/suporte",
+                    "chat": {"id": 321},
+                    "from": {"id": 123},
+                },
+            }))
+        finally:
+            set_runtime_services_override(None)
+
+        body = response.json()
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(body["action"], "suporte_sent")
+        self.assertEqual(me_testa_service.calls, 0)
+        self.assertEqual(gateway.messages, [(321, "Precisa de ajuda? Me chama por aqui: simplobot3@gmail.com")])
+
+    def test_sobre_command_bypasses_me_testa_session_flow(self) -> None:
+        me_testa_service = StubMeTestaService()
+        gateway = StubTelegramGateway(messages=[])
+        runtime = RuntimeServices(
+            intake_service=StubIntakeService(),
+            session_service=object(),
+            entry_service=object(),
+            me_testa_service=me_testa_service,
+            telegram_gateway=gateway,
+        )
+        set_runtime_services_override(lambda: runtime)
+        try:
+            response = asyncio.run(self._request({
+                "update_id": 14,
+                "message": {
+                    "message_id": 104,
+                    "text": "/sobre",
+                    "chat": {"id": 321},
+                    "from": {"id": 123},
+                },
+            }))
+        finally:
+            set_runtime_services_override(None)
+
+        body = response.json()
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(body["action"], "sobre_sent")
+        self.assertEqual(me_testa_service.calls, 0)
+        self.assertEqual(len(gateway.messages), 1)
+        self.assertIn("A Tutora ajuda você a estudar para o ENEM", gateway.messages[0][1])
+        self.assertIn("Organiza questões enviadas por texto ou foto", gateway.messages[0][1])
+
     async def _request(self, payload: dict) -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:

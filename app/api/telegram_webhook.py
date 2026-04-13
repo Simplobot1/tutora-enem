@@ -16,6 +16,8 @@ router = APIRouter(prefix="/webhooks", tags=["telegram"])
 _RELATORIO_COMMANDS = {"/relatorio"}
 _PERFIL_COMMANDS = {"/perfil"}
 _ADMIN_COMMANDS = {"/admin"}
+_SUPORTE_COMMANDS = {"/suporte"}
+_SOBRE_COMMANDS = {"/sobre"}
 _ME_TESTA_COMMANDS = {
     "/nova",
     "/novo",
@@ -41,6 +43,24 @@ def _command_name(text: str) -> str:
     if "@" in command:
         command = command.split("@", 1)[0]
     return command
+
+
+SUPORTE_TEXT = "Precisa de ajuda? Me chama por aqui: simplobot3@gmail.com"
+
+SOBRE_TEXT = "\n".join(
+    [
+        "A Tutora ajuda você a estudar para o ENEM com questões, correção e revisão.",
+        "",
+        "O que ela faz:",
+        "- Organiza questões enviadas por texto ou foto",
+        "- Corrige sua resposta e explica o raciocínio",
+        "- Comenta as alternativas para você entender o erro",
+        "- Ajuda a revisar com perfil de estudos e relatório",
+        "- Prepara revisões para o Anki quando faz sentido",
+        "",
+        "A ideia é estudar com clareza: entender por que errou, reforçar o que acertou e seguir para a próxima questão.",
+    ]
+)
 
 
 @router.post("/telegram", status_code=status.HTTP_202_ACCEPTED)
@@ -105,6 +125,18 @@ async def telegram_webhook(
             "Admin ainda não está disponível por aqui.",
         )
         return {"ok": True, "action": "admin_unavailable"}
+
+    if command in _SUPORTE_COMMANDS:
+        chat_id: int = message.get("chat", {}).get("id", 0)
+        services = resolve_runtime_services()
+        await services.telegram_gateway.send_text(chat_id, SUPORTE_TEXT)
+        return {"ok": True, "action": "suporte_sent"}
+
+    if command in _SOBRE_COMMANDS:
+        chat_id: int = message.get("chat", {}).get("id", 0)
+        services = resolve_runtime_services()
+        await services.telegram_gateway.send_text(chat_id, SOBRE_TEXT)
+        return {"ok": True, "action": "sobre_sent"}
 
     if command.startswith("/") and command not in _ME_TESTA_COMMANDS:
         chat_id: int = message.get("chat", {}).get("id", 0)
